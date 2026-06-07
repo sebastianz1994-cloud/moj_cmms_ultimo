@@ -326,19 +326,28 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
 
       _pollutionReasons = [
         'Input robot disturbed/refuse',
-        'Falling stacks',
-        'De-nester disturbed',
-        'Washing machine disturbed',
-        'Stacker disturbed',
+        'Falling piles through crooked inserts on the car',
+        'Distributor disturbed/refuse',
+        'Washing machine disturbed/refuse',
+        'Cart transport disturbed/refuse',
+        'Conveyor belt disturbed/refuse',
+        'Stacker disturbed/refuse',
+        'Forming table disturbed/refuse',
+        'Output robot disturbed/refuse',
+        'Control problem',
       ];
 
       _processReasons = [
         'Input robot disturbed',
-        'Line clogged',
-        'Waiting for operator',
-        'Sensor dirty',
-        'Wrong settings',
-        'Production stop',
+        'Falling piles through crooked inserts on the car',
+        'Distributor disturbed',
+        'Washing machine disturbed',
+        'Cart transport disturbed',
+        'Conveyor belt disturbed',
+        'Stacker disturbed',
+        'Forming table disturbed',
+        'Output robot disturbed',
+        'Control problem',
       ];
 
       _technicalFaultReasons = [
@@ -487,6 +496,22 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     
     // Auto-sync with Downtime Register immediately for any added minutes
     await _saveDowntimeEntry(reason, 1); 
+    _triggerAutoSave();
+  }
+
+  Future<void> _removeMinute(String reason) async {
+    if (_isLocked) return;
+    
+    final currentMinutes = _downtimeData[reason] ?? 0;
+    if (currentMinutes <= 0) return;
+
+    setState(() {
+      _downtimeData[reason] = currentMinutes - 1;
+      _downtimeControllers[reason]?.text = _downtimeData[reason].toString();
+    });
+    
+    // Auto-sync with Downtime Register immediately
+    await _saveDowntimeEntry(reason, -1); 
     _triggerAutoSave();
   }
 
@@ -1683,7 +1708,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                   0: FlexColumnWidth(3),
                   1: FixedColumnWidth(48),
                   2: FlexColumnWidth(4),
-                  3: FixedColumnWidth(80),
+                  3: FixedColumnWidth(90),
+                  4: FixedColumnWidth(80),
                 },
                 children: [
                   TableRow(
@@ -1692,6 +1718,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                       _buildHeaderCell(s.t('name')),
                       _buildHeaderCell(''),
                       _buildHeaderCell(s.t('comments')),
+                      _buildHeaderCell('', textAlign: TextAlign.center),
                       _buildHeaderCell(s.t('totalDowntimeMinutesShort'), textAlign: TextAlign.center),
                     ],
                   ),
@@ -1737,6 +1764,30 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                             onChanged: (v) => _updateOtherFields(),
                           ),
                         ),
+                        // Plus/Minus Buttons column (Only for Pollution and Process)
+                        Padding(
+                          padding: const EdgeInsets.all(4.0),
+                          child: _activeCategory != 'TechnicalFaults' 
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _removeMinute(reason),
+                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 22),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    onPressed: () => _addMinute(reason),
+                                    icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 22),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                ],
+                              )
+                            : const SizedBox.shrink(),
+                        ),
                         Padding(
                           padding: const EdgeInsets.all(8.0),
                           child: Center(
@@ -1755,13 +1806,36 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                                  border: minutes > 0 ? OutlineInputBorder(
+                                  border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: Colors.blue.shade100),
-                                  ) : InputBorder.none,
-                                  fillColor: minutes > 0 ? Colors.blue.shade50 : Colors.transparent,
+                                    borderSide: BorderSide(color: minutes > 0 ? Colors.blue.shade200 : Colors.grey.shade300),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: BorderSide(color: minutes > 0 ? Colors.blue.shade100 : Colors.grey.shade200),
+                                  ),
+                                  fillColor: minutes > 0 ? Colors.blue.shade50 : Colors.grey.shade50,
                                   filled: true,
                                 ),
+                                onChanged: (v) {
+                                  // Remove leading zeros and handle empty input
+                                  String cleanValue = v.replaceFirst(RegExp(r'^0+'), '');
+                                  if (cleanValue.isEmpty && v.isNotEmpty) {
+                                    cleanValue = '0';
+                                  }
+                                  
+                                  if (v != cleanValue) {
+                                    _downtimeControllers[reason]?.value = TextEditingValue(
+                                      text: cleanValue,
+                                      selection: TextSelection.collapsed(offset: cleanValue.length),
+                                    );
+                                  }
+
+                                  final val = int.tryParse(cleanValue) ?? 0;
+                                  setState(() {
+                                    _downtimeData[reason] = val;
+                                  });
+                                },
                                 onSubmitted: (v) => _handleManualDowntimeChange(reason, v),
                                 onEditingComplete: () {
                                   if (_downtimeControllers[reason] != null) {
