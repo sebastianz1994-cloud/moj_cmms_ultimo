@@ -567,13 +567,13 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     final now = DateTime.now();
     
     // Controllers for editable fields
-    final descController = TextEditingController(text: reason);
+    final descController = TextEditingController();
     final rootCauseController = TextEditingController();
     final reporterController = TextEditingController(text: widget.currentUsername);
     final repairedByController = TextEditingController();
     
-    String selectedLocation = _lokalizacjaOptions.first;
-    String selectedPriority = 'Medium';
+    String? selectedLocation;
+    String? selectedPriority;
     bool isFixed = false;
     
     DateTime regDate = now;
@@ -631,21 +631,34 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     // Editable fields
                     TextField(
                       controller: descController,
-                      decoration: const InputDecoration(labelText: 'DESCRIPTION OF THE FAULT', border: OutlineInputBorder()),
+                      decoration: InputDecoration(
+                        labelText: 'DESCRIPTION OF THE FAULT',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.description_outlined),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     
                     DropdownButtonFormField<String>(
                       value: selectedLocation,
-                      decoration: const InputDecoration(labelText: 'LOCATION', border: OutlineInputBorder()),
+                      hint: const Text('Select Location'),
+                      decoration: InputDecoration(
+                        labelText: 'LOCATION',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.location_on_outlined),
+                      ),
                       items: _lokalizacjaOptions.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
-                      onChanged: (v) => setDialogState(() => selectedLocation = v!),
+                      onChanged: (v) => setDialogState(() => selectedLocation = v),
                     ),
                     const SizedBox(height: 12),
                     
                     TextField(
                       controller: rootCauseController,
-                      decoration: const InputDecoration(labelText: 'ROOT CAUSE', border: OutlineInputBorder()),
+                      decoration: InputDecoration(
+                        labelText: 'ROOT CAUSE',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.question_mark_outlined),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     
@@ -654,16 +667,25 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                         Expanded(
                           child: DropdownButtonFormField<String>(
                             value: selectedPriority,
-                            decoration: const InputDecoration(labelText: 'PRIORITY', border: OutlineInputBorder()),
+                            hint: const Text('Select Priority'),
+                            decoration: InputDecoration(
+                              labelText: 'PRIORITY',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              prefixIcon: const Icon(Icons.priority_high),
+                            ),
                             items: ['Low', 'Medium', 'High', 'Critical'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                            onChanged: (v) => setDialogState(() => selectedPriority = v!),
+                            onChanged: (v) => setDialogState(() => selectedPriority = v),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: TextField(
                             controller: reporterController,
-                            decoration: const InputDecoration(labelText: 'REPORTING PERSON', border: OutlineInputBorder()),
+                            decoration: InputDecoration(
+                              labelText: 'REPORTING PERSON',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              prefixIcon: const Icon(Icons.person_outline),
+                            ),
                           ),
                         ),
                       ],
@@ -726,7 +748,11 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     
                     TextField(
                       controller: repairedByController,
-                      decoration: const InputDecoration(labelText: 'REPAIRED BY', border: OutlineInputBorder()),
+                      decoration: InputDecoration(
+                        labelText: 'REPAIRED BY',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.engineering_outlined),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     
@@ -761,6 +787,12 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
               TextButton(onPressed: () => Navigator.pop(context), child: Text(s.t('cancel'))),
               ElevatedButton(
                 onPressed: () async {
+                  if (descController.text.isEmpty || selectedLocation == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Description and Location are required'), backgroundColor: Colors.red),
+                    );
+                    return;
+                  }
                   // Save to failure_reports
                   final reportData = {
                     'unique_id': faultId,
@@ -768,7 +800,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     'lokalizacja': selectedLocation,
                     'linia': _selectedLine ?? '-',
                     'powod': rootCauseController.text,
-                    'priorytet': selectedPriority,
+                    'priorytet': selectedPriority ?? 'Medium',
                     'status': isFixed ? 'Closed' : 'Open',
                     'czy_rozwiazane': isFixed ? 1 : 0,
                     'data_rozpoczecia_naprawy': '${DateFormat('yyyy-MM-dd').format(startDate)} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
