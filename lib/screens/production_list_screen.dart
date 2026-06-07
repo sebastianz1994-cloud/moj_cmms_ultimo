@@ -605,13 +605,13 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     final now = DateTime.now();
     
     // Controllers for editable fields
-    final descController = TextEditingController();
+    final descController = TextEditingController(text: reason);
     final rootCauseController = TextEditingController();
     final reporterController = TextEditingController(text: widget.currentUsername);
     final repairedByController = TextEditingController();
     
-    String? selectedLocation;
-    String? selectedPriority;
+    String? selectedLocation = _lokalizacjaOptions.first;
+    String? selectedPriority = 'Medium';
     bool isFixed = false;
     
     DateTime regDate = now;
