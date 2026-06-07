@@ -972,7 +972,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
               onPrimary: Colors.white,
               onSurface: Colors.black87,
             ),
-            dialogTheme: DialogTheme(
+            dialogTheme: DialogThemeData(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             ),
           ),
@@ -993,7 +993,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
               primary: primaryColor,
               onSurface: Colors.black87,
             ),
-            dialogTheme: DialogTheme(
+            dialogTheme: DialogThemeData(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             ),
           ),
