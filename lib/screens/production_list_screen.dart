@@ -633,6 +633,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                       controller: descController,
                       decoration: InputDecoration(
                         labelText: 'DESCRIPTION OF THE FAULT',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         prefixIcon: const Icon(Icons.description_outlined),
                       ),
@@ -644,6 +645,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                       hint: const Text('Select Location'),
                       decoration: InputDecoration(
                         labelText: 'LOCATION',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         prefixIcon: const Icon(Icons.location_on_outlined),
                       ),
@@ -656,6 +658,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                       controller: rootCauseController,
                       decoration: InputDecoration(
                         labelText: 'ROOT CAUSE',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         prefixIcon: const Icon(Icons.question_mark_outlined),
                       ),
@@ -670,6 +673,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                             hint: const Text('Select Priority'),
                             decoration: InputDecoration(
                               labelText: 'PRIORITY',
+                              floatingLabelBehavior: FloatingLabelBehavior.always,
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               prefixIcon: const Icon(Icons.priority_high),
                             ),
@@ -683,6 +687,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                             controller: reporterController,
                             decoration: InputDecoration(
                               labelText: 'REPORTING PERSON',
+                              floatingLabelBehavior: FloatingLabelBehavior.always,
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               prefixIcon: const Icon(Icons.person_outline),
                             ),
@@ -750,6 +755,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                       controller: repairedByController,
                       decoration: InputDecoration(
                         labelText: 'REPAIRED BY',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         prefixIcon: const Icon(Icons.engineering_outlined),
                       ),
