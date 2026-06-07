@@ -46,6 +46,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
   final Map<String, int> _downtimeData = {};
   final Map<String, TextEditingController> _commentControllers = {};
   final Map<String, TextEditingController> _downtimeControllers = {};
+  final Map<String, List<Uint8List>> _reasonPhotos = {};
   final ImagePicker _imagePicker = ImagePicker();
   String _activeCategory = 'Pollution';
   bool _isLoading = false;
@@ -436,6 +437,19 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         last8Hours: true, 
       );
 
+      // Fetch photos before setState
+      final reports = await _dbHelper.getFailureReports();
+      final Map<String, List<Uint8List>> fetchedPhotos = {};
+      for (final reason in _reasons) {
+        final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
+        final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+        
+        fetchedPhotos[reason] = reasonReports
+            .where((r) => r['zdjecie_blob'] != null)
+            .map((r) => r['zdjecie_blob'] as Uint8List)
+            .toList();
+      }
+
       if (mounted) {
         setState(() {
           // Initialize/Clear with default values first
@@ -443,6 +457,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
             _downtimeData[reason] = 0;
             _commentControllers[reason]?.clear();
             _downtimeControllers[reason]?.text = '0';
+            _reasonPhotos[reason] = fetchedPhotos[reason] ?? [];
           }
           
           _barrelsWithWater = null;
@@ -563,6 +578,233 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     return '$paddedCount/W$week/$year';
   }
 
+  void _showFullImage(String currentReason) {
+    // Refresh photoReasons based on CURRENT state of _reasonPhotos
+    final photoReasons = _reasons.where((r) => _reasonPhotos[r]?.isNotEmpty ?? false).toList();
+    
+    if (photoReasons.isEmpty) {
+      // If we don't have photos in memory, it might be a reason we just added a photo to
+      // but state wasn't updated correctly. We check currentReason specifically.
+      if (_reasonPhotos[currentReason]?.isNotEmpty ?? false) {
+        photoReasons.add(currentReason);
+      } else {
+        return;
+      }
+    }
+
+    int currentReasonIndex = photoReasons.indexOf(currentReason);
+    if (currentReasonIndex == -1) currentReasonIndex = 0;
+    
+    // Tracking current photo within the current reason
+    int currentPhotoIndex = 0;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final currentReasonStr = photoReasons[currentReasonIndex];
+          // Ensure we have the latest list from the parent state
+          final photos = _reasonPhotos[currentReasonStr] ?? [];
+          
+          if (photos.isEmpty) {
+            return Center(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text("No photos available for this reason."),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Close"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          // Safety check for index
+           if (currentPhotoIndex >= photos.length) {
+             currentPhotoIndex = photos.length - 1;
+           }
+           if (currentPhotoIndex < 0) currentPhotoIndex = 0;
+
+           return Dialog(
+             backgroundColor: Colors.black.withOpacity(0.9),
+             insetPadding: EdgeInsets.zero,
+             child: Stack(
+               children: [
+                 // Image Viewer
+                 Center(
+                   child: InteractiveViewer(
+                     key: ValueKey('${currentReasonStr}_${currentPhotoIndex}'),
+                     child: Image.memory(
+                       photos[currentPhotoIndex],
+                       fit: BoxFit.contain,
+                     ),
+                   ),
+                 ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: Colors.black45,
+                    child: SafeArea(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  currentReasonStr,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Photo ${currentPhotoIndex + 1} of ${photos.length}',
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              // Delete current photo button
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 30),
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Delete Photo'),
+                                      content: const Text('Are you sure you want to delete this photo?'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, true), 
+                                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+
+                                  if (confirm == true) {
+                                    setState(() {
+                                      _reasonPhotos[currentReasonStr]!.removeAt(currentPhotoIndex);
+                                      if (_reasonPhotos[currentReasonStr]!.isEmpty) {
+                                        _reasonPhotos.remove(currentReasonStr);
+                                      }
+                                    });
+                                    
+                                    if (_reasonPhotos[currentReasonStr] == null) {
+                                      Navigator.pop(context);
+                                    } else {
+                                      setDialogState(() {
+                                        if (currentPhotoIndex >= _reasonPhotos[currentReasonStr]!.length) {
+                                          currentPhotoIndex = _reasonPhotos[currentReasonStr]!.length - 1;
+                                        }
+                                      });
+                                    }
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // navigation for multiple photos within same reason
+                if (photos.length > 1)
+                  Positioned(
+                    bottom: 40,
+                    left: 0,
+                    right: 0,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left, color: Colors.white, size: 40),
+                          onPressed: () {
+                            setDialogState(() {
+                              currentPhotoIndex = (currentPhotoIndex - 1 + photos.length) % photos.length;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 40),
+                        IconButton(
+                          icon: const Icon(Icons.chevron_right, color: Colors.white, size: 40),
+                          onPressed: () {
+                            setDialogState(() {
+                              currentPhotoIndex = (currentPhotoIndex + 1) % photos.length;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Navigation between reasons
+                if (photoReasons.length > 1)
+                  Positioned.fill(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Left Button
+                        IconButton(
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 30),
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              currentReasonIndex = (currentReasonIndex - 1 + photoReasons.length) % photoReasons.length;
+                              currentPhotoIndex = 0; // Reset photo index when changing reason
+                            });
+                          },
+                        ),
+                        // Right Button
+                        IconButton(
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                            child: const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 30),
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              currentReasonIndex = (currentReasonIndex + 1) % photoReasons.length;
+                              currentPhotoIndex = 0; // Reset photo index when changing reason
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _triggerAutoSave() {
     _autoSaveTimer?.cancel();
     setState(() {
@@ -575,9 +817,9 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     });
   }
 
-  Future<void> _pickImageAndOpenReport(String reason) async {
+  Future<void> _pickImageAndOpenReport(String reason, {ImageSource source = ImageSource.camera}) async {
     final XFile? image = await _imagePicker.pickImage(
-      source: ImageSource.camera,
+      source: source,
       imageQuality: 70,
     );
     
@@ -593,9 +835,62 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         );
         
         if (editedBytes != null && mounted) {
-          _showDetailedFaultReportDialog(reason, editedBytes);
+          setState(() {
+            if (_reasonPhotos[reason] == null) {
+              _reasonPhotos[reason] = [editedBytes];
+            } else {
+              _reasonPhotos[reason]!.add(editedBytes);
+            }
+          });
+          
+          // Show feedback
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Photo added to "$reason". Total: ${_reasonPhotos[reason]!.length}'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+
+          if (_activeCategory == 'TechnicalFaults') {
+            _showDetailedFaultReportDialog(reason, editedBytes);
+          } else {
+            // Just save photo without adding minutes
+            await _savePhotoOnly(reason, editedBytes);
+          }
         }
       }
+    }
+  }
+
+  Future<void> _savePhotoOnly(String reason, Uint8List photoBytes) async {
+    // Save to DB with photo but NO minute addition
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final minutes = _downtimeData[reason] ?? 0;
+
+    // Sync to failure register with current minutes and new photo
+    await _syncToFailureRegister(reason, minutes, dateStr, photoBytes: photoBytes);
+    
+    // Refresh local photos list from DB to ensure count is correct
+    final reports = await _dbHelper.getFailureReports();
+    final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
+    final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+    
+    final newPhotos = reasonReports
+        .where((r) => r['zdjecie_blob'] != null)
+        .map((r) => r['zdjecie_blob'] as Uint8List)
+        .toList();
+
+    // Also update production_downtime entry to persist the fact that we have data
+    await _saveDowntimeEntry(reason, minutes);
+    
+    if (mounted) {
+      setState(() {
+        _reasonPhotos[reason] = newPhotos;
+      });
+      _triggerAutoSave();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo saved successfully'), backgroundColor: Colors.green),
+      );
     }
   }
 
@@ -1261,7 +1556,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     }
   }
 
-  Future<void> _syncToFailureRegister(String reason, int totalMinutes, String dateStr) async {
+  Future<void> _syncToFailureRegister(String reason, int totalMinutes, String dateStr, {Uint8List? photoBytes}) async {
     // Generate a unique ID for this downtime event to prevent duplicates
     // Pattern: PL-[Line]-[Date]-[Reason]-[Shift]
     final syncId = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
@@ -1276,16 +1571,22 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         orElse: () => {},
       );
 
+      final Map<String, dynamic> updateData = {
+        'downtime_minutes': totalMinutes,
+        'opis': 'Storing List Downtime: $reason',
+        'status': 'ZAMKNIĘTY',
+        'czy_rozwiazane': 1,
+      };
+
+      if (photoBytes != null) {
+        updateData['zdjecie_blob'] = photoBytes;
+      }
+
       if (existing.isNotEmpty) {
         debugPrint('DEBUG: Updating existing failure report ID: ${existing['id']}');
         // Update existing record's downtime to match current total
         final failureId = existing['id'] as int;
-        await _dbHelper.updateFailureReport(failureId, {
-          'downtime_minutes': totalMinutes,
-          'opis': 'Storing List Downtime: $reason',
-          'status': 'ZAMKNIĘTY',
-          'czy_rozwiazane': 1,
-        });
+        await _dbHelper.updateFailureReport(failureId, updateData);
 
         // Also update corresponding task
         await _dbHelper.updateTaskByFailureId(failureId, {
@@ -1296,7 +1597,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       } else {
         debugPrint('DEBUG: Creating new failure report');
         // Create new failure report
-        final failureId = await _dbHelper.insertFailureReport({
+        final Map<String, dynamic> insertData = {
           'unique_id': syncId,
           'opis': 'Storing List Downtime: $reason',
           'lokalizacja': _selectedLine,
@@ -1309,7 +1610,13 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
           'created_by': widget.currentUsername,
           'created_at': DateTime.now().toIso8601String(),
           'kto_naprawil': widget.currentUsername,
-        });
+        };
+
+        if (photoBytes != null) {
+          insertData['zdjecie_blob'] = photoBytes;
+        }
+
+        final failureId = await _dbHelper.insertFailureReport(insertData);
 
         // Also add to Tasks table
         await _dbHelper.insertTask({
@@ -1705,11 +2012,12 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                   verticalInside: BorderSide(color: Colors.grey.shade100),
                 ),
                 columnWidths: const {
-                  0: FlexColumnWidth(3),
-                  1: FixedColumnWidth(48),
-                  2: FlexColumnWidth(4),
-                  3: FixedColumnWidth(90),
-                  4: FixedColumnWidth(80),
+                  0: FlexColumnWidth(2.2),
+                  1: FixedColumnWidth(64),
+                  2: FixedColumnWidth(50),
+                  3: FlexColumnWidth(4),
+                  4: FixedColumnWidth(90),
+                  5: FixedColumnWidth(80),
                 },
                 children: [
                   TableRow(
@@ -1717,6 +2025,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     children: [
                       _buildHeaderCell(s.t('name')),
                       _buildHeaderCell(''),
+                      _buildHeaderCell('', textAlign: TextAlign.center),
                       _buildHeaderCell(s.t('comments')),
                       _buildHeaderCell('', textAlign: TextAlign.center),
                       _buildHeaderCell(s.t('totalDowntimeMinutesShort'), textAlign: TextAlign.center),
@@ -1737,16 +2046,66 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                         Padding(
                           padding: const EdgeInsets.all(4.0),
                           child: Center(
-                            child: IconButton(
-                              onPressed: () => _pickImageAndOpenReport(reason),
-                              icon: const Icon(
-                                Icons.add_a_photo_outlined, 
-                                color: Colors.blue, 
-                                size: 22
-                              ),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  onPressed: () => _pickImageAndOpenReport(reason, source: ImageSource.camera),
+                                  icon: const Icon(
+                                    Icons.add_a_photo_outlined, 
+                                    color: Colors.blue, 
+                                    size: 20
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: 'Take photo',
+                                ),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  onPressed: () => _pickImageAndOpenReport(reason, source: ImageSource.gallery),
+                                  icon: const Icon(
+                                    Icons.photo_library_outlined, 
+                                    color: Colors.blue, 
+                                    size: 20
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: 'Pick from gallery',
+                                ),
+                              ],
                             ),
+                          ),
+                        ),
+                        // Photo Preview column
+                        Padding(
+                          padding: const EdgeInsets.all(4.0),
+                          child: Center(
+                            child: _reasonPhotos[reason]?.isNotEmpty ?? false
+                                ? GestureDetector(
+                                    onTap: () => _showFullImage(reason),
+                                    child: Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.blue.shade200),
+                                        image: DecorationImage(
+                                          image: MemoryImage(_reasonPhotos[reason]!.first),
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      color: Colors.grey.shade100,
+                                      border: Border.all(color: Colors.grey.shade200),
+                                    ),
+                                    child: Icon(Icons.image_outlined, size: 18, color: Colors.grey.shade400),
+                                  ),
                           ),
                         ),
                         Padding(
@@ -2325,25 +2684,29 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text('Edit Image'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.undo),
+            tooltip: 'Undo',
             onPressed: _paths.isNotEmpty ? () => setState(() => _paths.removeLast()) : null,
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
+            tooltip: 'Clear All',
             onPressed: () => setState(() => _paths.clear()),
           ),
-          IconButton(
-            icon: const Icon(Icons.check, color: Colors.green),
-            onPressed: _saveAndExit,
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -2387,6 +2750,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
               ),
             ),
           ),
+          // Drawing Tools
           Container(
             color: Colors.grey.shade900,
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -2404,6 +2768,45 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                 _widthPicker(2.0),
                 _widthPicker(4.0),
                 _widthPicker(8.0),
+              ],
+            ),
+          ),
+          // Modern Action Buttons
+          Container(
+            color: Colors.grey.shade900,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                    label: Text(s.t('cancel').toUpperCase()),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey.shade800,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _saveAndExit,
+                    icon: const Icon(Icons.check_circle_outline, size: 24),
+                    label: Text(s.t('confirm').toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 8,
+                      shadowColor: Colors.green.withOpacity(0.5),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
