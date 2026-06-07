@@ -13,7 +13,9 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/gestures.dart';
 
 class ProductionListScreen extends StatefulWidget {
@@ -323,31 +325,32 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       ];
 
       _pollutionReasons = [
-        s.t('pollutionInvoerrobot'),
-        s.t('pollutionVallendeStapels'),
-        s.t('pollutionOntnester'),
-        s.t('pollutionWasmachine'),
-        s.t('pollutionStapelaar'),
+        'Input robot disturbed/refuse',
+        'Falling stacks',
+        'De-nester disturbed',
+        'Washing machine disturbed',
+        'Stacker disturbed',
       ];
 
       _processReasons = [
-        s.t('processLijnVerstopt'),
-        s.t('processWachtenOpOperator'),
-        s.t('processSensorVervuild'),
-        s.t('processInstellingFout'),
-        s.t('processProductieStop'),
+        'Input robot disturbed',
+        'Line clogged',
+        'Waiting for operator',
+        'Sensor dirty',
+        'Wrong settings',
+        'Production stop',
       ];
 
       _technicalFaultReasons = [
-        s.t('tfInputRobotDefect'),
-        s.t('tfOntnesterDefect'),
-        s.t('tfWasmachineDefect'),
-        s.t('tfKarrentransportDefect'),
-        s.t('tfTransportbandDefect'),
-        s.t('tfStapelaarDefect'),
-        s.t('tfFormeertafelDefect'),
-        s.t('tfUitvoerrobotDefect'),
-        s.t('tfBesturingsprobleem'),
+        'Input robot defect',
+        'Distributor defect',
+        'Washing machine defect',
+        'Cart transport defect',
+        'Conveyor belt defect',
+        'Stacker defect',
+        'Forming table defect',
+        'Output robot defect',
+        'Control problem',
       ];
 
       _reasons = [
@@ -556,7 +559,17 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     if (image != null) {
       final bytes = await image.readAsBytes();
       if (mounted) {
-        _showDetailedFaultReportDialog(reason, bytes);
+        // Open editor before report
+        final Uint8List? editedBytes = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageEditorScreen(imageBytes: bytes),
+          ),
+        );
+        
+        if (editedBytes != null && mounted) {
+          _showDetailedFaultReportDialog(reason, editedBytes);
+        }
       }
     }
   }
@@ -1667,8 +1680,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                   verticalInside: BorderSide(color: Colors.grey.shade100),
                 ),
                 columnWidths: const {
-                  0: FixedColumnWidth(48),
-                  1: FlexColumnWidth(3),
+                  0: FlexColumnWidth(3),
+                  1: FixedColumnWidth(48),
                   2: FlexColumnWidth(4),
                   3: FixedColumnWidth(80),
                 },
@@ -1676,8 +1689,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                   TableRow(
                     decoration: BoxDecoration(color: Colors.grey.shade50),
                     children: [
-                      _buildHeaderCell(''),
                       _buildHeaderCell(s.t('name')),
+                      _buildHeaderCell(''),
                       _buildHeaderCell(s.t('comments')),
                       _buildHeaderCell(s.t('totalDowntimeMinutesShort'), textAlign: TextAlign.center),
                     ],
@@ -1691,25 +1704,23 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     return TableRow(
                       children: [
                         Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 14.0),
+                          child: Text(reason, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+                        ),
+                        Padding(
                           padding: const EdgeInsets.all(4.0),
                           child: Center(
                             child: IconButton(
-                              onPressed: () {
-                                if (_activeCategory == 'TechnicalFaults') {
-                                  _pickImageAndOpenReport(reason);
-                                } else {
-                                  _addMinute(reason);
-                                }
-                              },
-                              icon: const Icon(Icons.add_circle, color: Colors.blue, size: 22),
+                              onPressed: () => _pickImageAndOpenReport(reason),
+                              icon: const Icon(
+                                Icons.add_a_photo_outlined, 
+                                color: Colors.blue, 
+                                size: 22
+                              ),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                             ),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 14.0),
-                          child: Text(reason, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
                         ),
                         Padding(
                           padding: const EdgeInsets.all(8.0),
@@ -2221,4 +2232,201 @@ class _DowntimeShiftTileState extends State<_DowntimeShiftTile> {
       ],
     );
   }
+}
+
+class ImageEditorScreen extends StatefulWidget {
+  final Uint8List imageBytes;
+  const ImageEditorScreen({super.key, required this.imageBytes});
+
+  @override
+  State<ImageEditorScreen> createState() => _ImageEditorScreenState();
+}
+
+class _ImageEditorScreenState extends State<ImageEditorScreen> {
+  final GlobalKey _repaintKey = GlobalKey();
+  final List<_DrawnPath> _paths = [];
+  Color _currentColor = Colors.red;
+  double _currentWidth = 4.0;
+  bool _isEraser = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text('Edit Image'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.undo),
+            onPressed: _paths.isNotEmpty ? () => setState(() => _paths.removeLast()) : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => setState(() => _paths.clear()),
+          ),
+          IconButton(
+            icon: const Icon(Icons.check, color: Colors.green),
+            onPressed: _saveAndExit,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: RepaintBoundary(
+                  key: _repaintKey,
+                  child: GestureDetector(
+                    onPanStart: (details) {
+                      setState(() {
+                        _paths.add(_DrawnPath(
+                          path: Path()..moveTo(details.localPosition.dx, details.localPosition.dy),
+                          color: _isEraser ? Colors.transparent : _currentColor,
+                          width: _currentWidth,
+                          isEraser: _isEraser,
+                        ));
+                      });
+                    },
+                    onPanUpdate: (details) {
+                      setState(() {
+                        if (_paths.isNotEmpty) {
+                          _paths.last.path.lineTo(details.localPosition.dx, details.localPosition.dy);
+                        }
+                      });
+                    },
+                    child: Stack(
+                      children: [
+                        Image.memory(widget.imageBytes, fit: BoxFit.contain),
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _DrawingPainter(paths: _paths),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            color: Colors.grey.shade900,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _colorPicker(Colors.red),
+                _colorPicker(Colors.blue),
+                _colorPicker(Colors.green),
+                _colorPicker(Colors.yellow),
+                IconButton(
+                  icon: Icon(Icons.auto_fix_normal, color: _isEraser ? Colors.white : Colors.grey),
+                  onPressed: () => setState(() => _isEraser = !_isEraser),
+                ),
+                _widthPicker(2.0),
+                _widthPicker(4.0),
+                _widthPicker(8.0),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _colorPicker(Color color) {
+    bool isSelected = _currentColor == color && !_isEraser;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _currentColor = color;
+        _isEraser = false;
+      }),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 2),
+          boxShadow: [if (isSelected) BoxShadow(color: color.withOpacity(0.5), blurRadius: 8)],
+        ),
+      ),
+    );
+  }
+
+  Widget _widthPicker(double width) {
+    bool isSelected = _currentWidth == width;
+    return GestureDetector(
+      onTap: () => setState(() => _currentWidth = width),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isSelected ? Colors.white24 : Colors.transparent,
+        ),
+        child: Center(
+          child: Container(
+            width: width + 2,
+            height: width + 2,
+            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveAndExit() async {
+    try {
+      final boundary = _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData != null) {
+        if (mounted) Navigator.pop(context, byteData.buffer.asUint8List());
+      }
+    } catch (e) {
+      debugPrint('Error saving edited image: $e');
+    }
+  }
+}
+
+class _DrawnPath {
+  final Path path;
+  final Color color;
+  final double width;
+  final bool isEraser;
+
+  _DrawnPath({required this.path, required this.color, required this.width, this.isEraser = false});
+}
+
+class _DrawingPainter extends CustomPainter {
+  final List<_DrawnPath> paths;
+  _DrawingPainter({required this.paths});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+    for (var item in paths) {
+      final paint = Paint()
+        ..color = item.color
+        ..strokeWidth = item.width
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      if (item.isEraser) {
+        paint.blendMode = BlendMode.clear;
+      }
+
+      canvas.drawPath(item.path, paint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
