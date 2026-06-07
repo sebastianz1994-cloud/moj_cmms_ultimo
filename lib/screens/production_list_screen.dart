@@ -629,68 +629,77 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     const SizedBox(height: 16),
                     
                     // Editable fields
-                    TextField(
+                    _buildModernTextField(
                       controller: descController,
-                      decoration: InputDecoration(
-                        labelText: 'DESCRIPTION OF THE FAULT',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.description_outlined),
+                      label: 'DESCRIPTION OF THE FAULT',
+                      icon: Icons.description_outlined,
+                      color: Colors.blue,
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        value: selectedLocation,
+                        hint: const Text('Select Location', style: TextStyle(fontSize: 13)),
+                        decoration: const InputDecoration(
+                          labelText: 'LOCATION',
+                          labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          border: InputBorder.none,
+                          prefixIcon: Icon(Icons.location_on_outlined, color: Colors.blue, size: 20),
+                        ),
+                        items: _lokalizacjaOptions.map((l) => DropdownMenuItem(value: l, child: Text(l, style: const TextStyle(fontSize: 13)))).toList(),
+                        onChanged: (v) => setDialogState(() => selectedLocation = v),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     
-                    DropdownButtonFormField<String>(
-                      value: selectedLocation,
-                      hint: const Text('Select Location'),
-                      decoration: InputDecoration(
-                        labelText: 'LOCATION',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.location_on_outlined),
-                      ),
-                      items: _lokalizacjaOptions.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
-                      onChanged: (v) => setDialogState(() => selectedLocation = v),
-                    ),
-                    const SizedBox(height: 12),
-                    
-                    TextField(
+                    _buildModernTextField(
                       controller: rootCauseController,
-                      decoration: InputDecoration(
-                        labelText: 'ROOT CAUSE',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.question_mark_outlined),
-                      ),
+                      label: 'ROOT CAUSE',
+                      icon: Icons.question_mark_outlined,
+                      color: Colors.blue,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     
                     Row(
                       children: [
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: selectedPriority,
-                            hint: const Text('Select Priority'),
-                            decoration: InputDecoration(
-                              labelText: 'PRIORITY',
-                              floatingLabelBehavior: FloatingLabelBehavior.always,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              prefixIcon: const Icon(Icons.priority_high),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.blue.withOpacity(0.2)),
                             ),
-                            items: ['Low', 'Medium', 'High', 'Critical'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                            onChanged: (v) => setDialogState(() => selectedPriority = v),
+                            child: DropdownButtonFormField<String>(
+                              value: selectedPriority,
+                              hint: const Text('Priority', style: TextStyle(fontSize: 13)),
+                              decoration: const InputDecoration(
+                                labelText: 'PRIORITY',
+                                labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                floatingLabelBehavior: FloatingLabelBehavior.always,
+                                border: InputBorder.none,
+                                prefixIcon: Icon(Icons.priority_high, color: Colors.blue, size: 20),
+                              ),
+                              items: ['Low', 'Medium', 'High', 'Critical'].map((p) => DropdownMenuItem(value: p, child: Text(p, style: const TextStyle(fontSize: 13)))).toList(),
+                              onChanged: (v) => setDialogState(() => selectedPriority = v),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: TextField(
+                          child: _buildModernTextField(
                             controller: reporterController,
-                            decoration: InputDecoration(
-                              labelText: 'REPORTING PERSON',
-                              floatingLabelBehavior: FloatingLabelBehavior.always,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              prefixIcon: const Icon(Icons.person_outline),
-                            ),
+                            label: 'REPORTING PERSON',
+                            icon: Icons.person_outline,
+                            color: Colors.blue,
                           ),
                         ),
                       ],
@@ -701,64 +710,57 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('REPAIR START', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              OutlinedButton(
-                                onPressed: () async {
-                                  final d = await showDatePicker(context: context, initialDate: startDate, firstDate: DateTime(2020), lastDate: DateTime(2100));
-                                  if (d != null) setDialogState(() => startDate = d);
-                                },
-                                child: Text(DateFormat('yyyy-MM-dd').format(startDate)),
-                              ),
-                              OutlinedButton(
-                                onPressed: () async {
-                                  final t = await showTimePicker(context: context, initialTime: startTime);
-                                  if (t != null) setDialogState(() => startTime = t);
-                                },
-                                child: Text(startTime.format(context)),
-                              ),
-                            ],
+                          child: _buildModernDateTimePicker(
+                            label: 'REPAIR START',
+                            date: startDate,
+                            time: startTime,
+                            color: Colors.blue,
+                            icon: Icons.play_arrow_rounded,
+                            onTap: () async {
+                              final DateTime? d = await _showModernDatePicker(startDate, Colors.blue);
+                              if (d != null) {
+                                final TimeOfDay? t = await _showModernTimePicker(startTime, Colors.blue);
+                                if (t != null) {
+                                  setDialogState(() {
+                                    startDate = d;
+                                    startTime = t;
+                                  });
+                                }
+                              }
+                            },
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('REPAIR END', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              OutlinedButton(
-                                onPressed: () async {
-                                  final d = await showDatePicker(context: context, initialDate: endDate, firstDate: DateTime(2020), lastDate: DateTime(2100));
-                                  if (d != null) setDialogState(() => endDate = d);
-                                },
-                                child: Text(DateFormat('yyyy-MM-dd').format(endDate)),
-                              ),
-                              OutlinedButton(
-                                onPressed: () async {
-                                  final t = await showTimePicker(context: context, initialTime: endTime);
-                                  if (t != null) setDialogState(() => endTime = t);
-                                },
-                                child: Text(endTime.format(context)),
-                              ),
-                            ],
+                          child: _buildModernDateTimePicker(
+                            label: 'REPAIR END',
+                            date: endDate,
+                            time: endTime,
+                            color: Colors.green,
+                            icon: Icons.stop_rounded,
+                            onTap: () async {
+                              final DateTime? d = await _showModernDatePicker(endDate, Colors.green);
+                              if (d != null) {
+                                final TimeOfDay? t = await _showModernTimePicker(endTime, Colors.green);
+                                if (t != null) {
+                                  setDialogState(() {
+                                    endDate = d;
+                                    endTime = t;
+                                  });
+                                }
+                              }
+                            },
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     
-                    TextField(
+                    _buildModernTextField(
                       controller: repairedByController,
-                      decoration: InputDecoration(
-                        labelText: 'REPAIRED BY',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        prefixIcon: const Icon(Icons.engineering_outlined),
-                      ),
+                      label: 'REPAIRED BY',
+                      icon: Icons.engineering_outlined,
+                      color: Colors.blueGrey,
                     ),
                     const SizedBox(height: 16),
                     
@@ -865,6 +867,142 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
           Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+
+  // Modern UI Helper Methods
+  Widget _buildModernDateTimePicker({
+    required String label,
+    required DateTime date,
+    required TimeOfDay time,
+    required Color color,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: color.withOpacity(0.8),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${DateFormat('dd MMM yyyy').format(date)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            Text(
+              '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModernTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required Color color,
+  }) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: color.withOpacity(0.8), fontWeight: FontWeight.bold, fontSize: 12),
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        prefixIcon: Icon(icon, color: color, size: 20),
+        filled: true,
+        fillColor: color.withOpacity(0.05),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: color.withOpacity(0.2)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: color.withOpacity(0.2)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: color, width: 1.5),
+        ),
+      ),
+    );
+  }
+
+  Future<DateTime?> _showModernDatePicker(DateTime initialDate, Color primaryColor) async {
+    return await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: primaryColor,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+            dialogTheme: DialogTheme(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+  }
+
+  Future<TimeOfDay?> _showModernTimePicker(TimeOfDay initialTime, Color primaryColor) async {
+    return await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: primaryColor,
+              onSurface: Colors.black87,
+            ),
+            dialogTheme: DialogTheme(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            ),
+          ),
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+            child: child!,
+          ),
+        );
+      },
     );
   }
 
