@@ -986,12 +986,24 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     return await showTimePicker(
       context: context,
       initialTime: initialTime,
+      initialEntryMode: TimePickerEntryMode.input,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
               primary: primaryColor,
               onSurface: Colors.black87,
+            ),
+            timePickerTheme: TimePickerThemeData(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              hourMinuteShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              hourMinuteColor: primaryColor.withOpacity(0.05),
+              hourMinuteTextColor: Colors.black87,
+              hourMinuteTextStyle: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
+              inputDecorationTheme: InputDecorationTheme(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.all(0),
+              ),
             ),
             dialogTheme: DialogThemeData(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
