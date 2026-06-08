@@ -142,6 +142,37 @@ class DBHelper {
       ''');
     }
 
+    // Verify fault_options table
+    if (!tableNames.contains('fault_options')) {
+      await db.execute('''
+        CREATE TABLE fault_options (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          category TEXT NOT NULL,
+          value TEXT NOT NULL,
+          UNIQUE(category, value)
+        )
+      ''');
+      // Seed initial values
+      final initialOptions = [
+        {'category': 'priority', 'value': 'Low'},
+        {'category': 'priority', 'value': 'Medium'},
+        {'category': 'priority', 'value': 'High'},
+        {'category': 'priority', 'value': 'Critical'},
+        {'category': 'location', 'value': 'Kartransport'},
+        {'category': 'location', 'value': 'Rekjesband'},
+        {'category': 'location', 'value': 'Invoerrobot'},
+        {'category': 'location', 'value': 'Uitvoerrobot'},
+        {'category': 'location', 'value': 'Other'},
+        {'category': 'root_cause', 'value': 'Mechanical Failure'},
+        {'category': 'root_cause', 'value': 'Electrical Issue'},
+        {'category': 'root_cause', 'value': 'Operator Error'},
+        {'category': 'root_cause', 'value': 'Wear and Tear'},
+      ];
+      for (var opt in initialOptions) {
+        await db.insert('fault_options', opt);
+      }
+    }
+
     // Verify production_entries columns
     if (tableNames.contains('production_entries')) {
       final info = await db.rawQuery('PRAGMA table_info(production_entries)');
@@ -1643,12 +1674,42 @@ class DBHelper {
     return res;
   }
 
+  Future<void> deleteFailureReport(int id) async {
+    if (kIsWeb) {
+      _webFailureReports.removeWhere((r) => r['id'] == id);
+      return;
+    }
+    final db = await database;
+    await db.delete('failure_reports', where: 'id = ?', whereArgs: [id]);
+    _backupTable('failure_reports', 'failures');
+  }
+
   Future<List<Map<String, dynamic>>> getFailureReports() async {
     if (kIsWeb) {
       return _webFailureReports;
     }
     final db = await database;
     return db.query('failure_reports', orderBy: 'created_at DESC');
+  }
+
+  // Fault Options Methods
+  Future<List<String>> getFaultOptions(String category) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final res = await db.query('fault_options', where: 'category = ?', whereArgs: [category]);
+    return res.map((m) => m['value'] as String).toList();
+  }
+
+  Future<void> insertFaultOption(String category, String value) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.insert('fault_options', {'category': category, 'value': value}, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> deleteFaultOption(String category, String value) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.delete('fault_options', where: 'category = ? AND value = ?', whereArgs: [category, value]);
   }
 
   Future<Map<String, dynamic>> getDashboardStats() async {

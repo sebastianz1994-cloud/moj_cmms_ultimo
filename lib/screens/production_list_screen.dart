@@ -46,7 +46,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
   final Map<String, int> _downtimeData = {};
   final Map<String, TextEditingController> _commentControllers = {};
   final Map<String, TextEditingController> _downtimeControllers = {};
-  final Map<String, List<Uint8List>> _reasonPhotos = {};
+  final Map<String, List<Map<String, dynamic>>> _reasonPhotos = {};
   final ImagePicker _imagePicker = ImagePicker();
   String _activeCategory = 'Pollution';
   bool _isLoading = false;
@@ -439,14 +439,18 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
 
       // Fetch photos before setState
       final reports = await _dbHelper.getFailureReports();
-      final Map<String, List<Uint8List>> fetchedPhotos = {};
+      final Map<String, List<Map<String, dynamic>>> fetchedPhotos = {};
       for (final reason in _reasons) {
         final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
         final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
         
         fetchedPhotos[reason] = reasonReports
             .where((r) => r['zdjecie_blob'] != null)
-            .map((r) => r['zdjecie_blob'] as Uint8List)
+            .map((r) => {
+              'id': r['id'],
+              'bytes': r['zdjecie_blob'] as Uint8List,
+              'description': r['opis'] as String? ?? '',
+            })
             .toList();
       }
 
@@ -597,6 +601,10 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     
     // Tracking current photo within the current reason
     int currentPhotoIndex = 0;
+    
+    // Position and Scale for the comment frame
+    Offset commentOffset = const Offset(20, 100); // Initial bottom-left-ish
+    double commentScale = 1.0;
 
     showDialog(
       context: context,
@@ -633,6 +641,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
            }
            if (currentPhotoIndex < 0) currentPhotoIndex = 0;
 
+           final s = AppStrings.of(context);
+
            return Dialog(
              backgroundColor: Colors.black.withOpacity(0.9),
              insetPadding: EdgeInsets.zero,
@@ -643,7 +653,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                    child: InteractiveViewer(
                      key: ValueKey('${currentReasonStr}_${currentPhotoIndex}'),
                      child: Image.memory(
-                       photos[currentPhotoIndex],
+                       photos[currentPhotoIndex]['bytes'],
                        fit: BoxFit.contain,
                      ),
                    ),
@@ -661,7 +671,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                         children: [
                           Expanded(
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
@@ -671,7 +681,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                 ),
                                 Text(
                                   'Photo ${currentPhotoIndex + 1} of ${photos.length}',
-                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),
@@ -699,6 +709,11 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                   );
 
                                   if (confirm == true) {
+                                    final photoId = photos[currentPhotoIndex]['id'];
+                                    if (photoId != null) {
+                                      await _dbHelper.deleteFailureReport(photoId);
+                                    }
+
                                     setState(() {
                                       _reasonPhotos[currentReasonStr]!.removeAt(currentPhotoIndex);
                                       if (_reasonPhotos[currentReasonStr]!.isEmpty) {
@@ -729,6 +744,109 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                     ),
                   ),
                 ),
+
+                // Description Overlay with Drag and Resize
+                if (_activeCategory != 'TechnicalFaults' && (photos[currentPhotoIndex]['description']?.isNotEmpty ?? false))
+                  Positioned(
+                    left: commentOffset.dx,
+                    bottom: commentOffset.dy,
+                    child: GestureDetector(
+                      onPanUpdate: (details) {
+                        setDialogState(() {
+                          commentOffset += Offset(details.delta.dx, -details.delta.dy);
+                          // Basic screen bounds check
+                          if (commentOffset.dy < 20) commentOffset = Offset(commentOffset.dx, 20);
+                          if (commentOffset.dx < 0) commentOffset = Offset(0, commentOffset.dy);
+                        });
+                      },
+                      child: Transform.scale(
+                        scale: commentScale,
+                        alignment: Alignment.bottomLeft,
+                        child: Container(
+                          width: 280, // Base width
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.75),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.yellow.shade600, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.5),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.comment_outlined, color: Colors.yellow.shade600, size: 16),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.t('comments').toUpperCase(),
+                                        style: TextStyle(
+                                          color: Colors.yellow.shade600,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 1.0,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // Drag indicator icon
+                                  Icon(Icons.drag_indicator, color: Colors.white.withOpacity(0.3), size: 16),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                photos[currentPhotoIndex]['description'],
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                // Resize Slider Overlay
+                if (_activeCategory != 'TechnicalFaults' && (photos[currentPhotoIndex]['description']?.isNotEmpty ?? false))
+                  Positioned(
+                    right: 20,
+                    bottom: 100,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.zoom_in, color: Colors.yellow, size: 20),
+                        SizedBox(
+                          height: 150,
+                          child: RotatedBox(
+                            quarterTurns: 3,
+                            child: Slider(
+                              value: commentScale,
+                              min: 0.5,
+                              max: 2.0,
+                              activeColor: Colors.yellow.shade600,
+                              inactiveColor: Colors.white24,
+                              onChanged: (v) => setDialogState(() => commentScale = v),
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.zoom_out, color: Colors.yellow, size: 20),
+                      ],
+                    ),
+                  ),
 
                 // navigation for multiple photos within same reason
                 if (photos.length > 1)
@@ -818,6 +936,18 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
   }
 
   Future<void> _pickImageAndOpenReport(String reason, {ImageSource source = ImageSource.camera}) async {
+    // Limit to 5 photos per reason
+    final currentPhotos = _reasonPhotos[reason] ?? [];
+    if (currentPhotos.length >= 5) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Maksymalna liczba zdjęć (5) została osiągnięta.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     final XFile? image = await _imagePicker.pickImage(
       source: source,
       imageQuality: 70,
@@ -827,19 +957,30 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       final bytes = await image.readAsBytes();
       if (mounted) {
         // Open editor before report
-        final Uint8List? editedBytes = await Navigator.push(
+        final result = await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => ImageEditorScreen(imageBytes: bytes),
+            builder: (context) => ImageEditorScreen(
+              imageBytes: bytes,
+              initialDescription: reason,
+              showDescription: _activeCategory != 'TechnicalFaults',
+            ),
           ),
         );
         
-        if (editedBytes != null && mounted) {
+        if (result != null && result is Map && mounted) {
+          final editedBytes = result['image'] as Uint8List;
+          final description = result['description'] as String;
+
           setState(() {
+            final photoData = {
+              'bytes': editedBytes,
+              'description': description,
+            };
             if (_reasonPhotos[reason] == null) {
-              _reasonPhotos[reason] = [editedBytes];
+              _reasonPhotos[reason] = [photoData];
             } else {
-              _reasonPhotos[reason]!.add(editedBytes);
+              _reasonPhotos[reason]!.add(photoData);
             }
           });
           
@@ -855,20 +996,23 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
             _showDetailedFaultReportDialog(reason, editedBytes);
           } else {
             // Just save photo without adding minutes
-            await _savePhotoOnly(reason, editedBytes);
+            await _savePhotoOnly(reason, editedBytes, description: description);
           }
         }
       }
     }
   }
 
-  Future<void> _savePhotoOnly(String reason, Uint8List photoBytes) async {
+  Future<void> _savePhotoOnly(String reason, Uint8List photoBytes, {String? description}) async {
     // Save to DB with photo but NO minute addition
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final minutes = _downtimeData[reason] ?? 0;
 
+    // Use a unique ID for each photo so they don't overwrite each other
+    final photoSyncId = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}-${DateTime.now().millisecondsSinceEpoch}';
+
     // Sync to failure register with current minutes and new photo
-    await _syncToFailureRegister(reason, minutes, dateStr, photoBytes: photoBytes);
+    await _syncToFailureRegister(reason, minutes, dateStr, photoBytes: photoBytes, description: description, overrideSyncId: photoSyncId);
     
     // Refresh local photos list from DB to ensure count is correct
     final reports = await _dbHelper.getFailureReports();
@@ -877,7 +1021,11 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     
     final newPhotos = reasonReports
         .where((r) => r['zdjecie_blob'] != null)
-        .map((r) => r['zdjecie_blob'] as Uint8List)
+        .map((r) => {
+          'id': r['id'],
+          'bytes': r['zdjecie_blob'] as Uint8List,
+          'description': r['opis'] as String? ?? '',
+        })
         .toList();
 
     // Also update production_downtime entry to persist the fact that we have data
@@ -899,17 +1047,24 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     final faultId = await _generateFaultId();
     final now = DateTime.now();
     
+    // Custom options lists
+    List<String> locations = await _dbHelper.getFaultOptions('location');
+    List<String> priorities = await _dbHelper.getFaultOptions('priority');
+    List<String> rootCauses = await _dbHelper.getFaultOptions('root_cause');
+    List<String> repairedByOptions = await _dbHelper.getFaultOptions('repaired_by');
+
     // Controllers for editable fields
-    final descController = TextEditingController(text: reason);
-    final rootCauseController = TextEditingController();
+    final descController = TextEditingController();
     final reporterController = TextEditingController(text: widget.currentUsername);
-    final repairedByController = TextEditingController();
     
-    String? selectedLocation = _lokalizacjaOptions.first;
-    String? selectedPriority = 'Medium';
+    String? selectedLocation;
+    String? selectedPriority;
+    String? selectedRootCause;
+    String? selectedRepairedBy;
     bool isFixed = false;
     
     DateTime regDate = now;
+    TimeOfDay regTime = TimeOfDay.now();
     DateTime startDate = now;
     DateTime endDate = now;
     
@@ -931,259 +1086,578 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
 
           final downtime = calculateDowntime();
 
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(Icons.report_problem, color: Colors.orange),
-                const SizedBox(width: 10),
-                Text('FAULT REPORT: $faultId'),
-              ],
-            ),
-            content: SizedBox(
-              width: 600,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Auto-generated info
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            elevation: 16,
+            child: Container(
+              width: 650,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: Colors.white,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade700,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      gradient: LinearGradient(
+                        colors: [Colors.blue.shade800, Colors.blue.shade600],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.report_problem_rounded, color: Colors.white, size: 28),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'FAULT REPORT'.toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              Text(
+                                faultId,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          _buildDialogRow('FAULT ID', faultId),
-                          _buildDialogRow('REGISTRATION DATE', DateFormat('yyyy-MM-dd HH:mm').format(regDate)),
+                          // Auto-generated info
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: () async {
+                                      final DateTime? d = await _showModernDatePicker(regDate, Colors.blue.shade700);
+                                      if (d != null) {
+                                        final TimeOfDay? t = await _showModernTimePicker(regTime, Colors.blue.shade700);
+                                        if (t != null) {
+                                          setDialogState(() {
+                                            regDate = d;
+                                            regTime = t;
+                                          });
+                                        }
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: _buildInfoItem(
+                                      'REGISTRATION DATE', 
+                                      '${DateFormat('yyyy-MM-dd').format(regDate)} ${regTime.hour.toString().padLeft(2, '0')}:${regTime.minute.toString().padLeft(2, '0')}', 
+                                      Icons.calendar_today_outlined
+                                    ),
+                                  ),
+                                ),
+                                Container(width: 1, height: 30, color: Colors.grey.shade300),
+                                Expanded(child: _buildInfoItem('LINE', _selectedLine ?? '-', Icons.settings_input_component_outlined)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          
+                          // Description
+                          _buildModernTextField(
+                            controller: descController,
+                            label: 'DESCRIPTION OF THE FAULT',
+                            icon: Icons.description_outlined,
+                            color: Colors.blue.shade700,
+                            maxLines: 2,
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Location Dropdown
+                          _buildModernDropdown(
+                            label: 'LOCATION',
+                            value: selectedLocation,
+                            items: locations,
+                            icon: Icons.location_on_outlined,
+                            onChanged: (v) => setDialogState(() => selectedLocation = v),
+                            onAddNew: () async {
+                              final newLoc = await _showAddNewOptionDialog('LOCATION');
+                              if (newLoc != null && newLoc.isNotEmpty) {
+                                await _dbHelper.insertFaultOption('location', newLoc);
+                                final updated = await _dbHelper.getFaultOptions('location');
+                                setDialogState(() {
+                                  locations = updated;
+                                  selectedLocation = newLoc;
+                                });
+                              }
+                            },
+                            onDelete: (val) async {
+                              final confirm = await _showDeleteOptionConfirmation('LOCATION', val);
+                              if (confirm == true) {
+                                await _dbHelper.deleteFaultOption('location', val);
+                                final updated = await _dbHelper.getFaultOptions('location');
+                                setDialogState(() {
+                                  locations = updated;
+                                  if (selectedLocation == val) selectedLocation = null;
+                                });
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Root Cause
+                          _buildModernDropdown(
+                            label: 'ROOT CAUSE',
+                            value: selectedRootCause,
+                            items: rootCauses,
+                            icon: Icons.help_outline_rounded,
+                            onChanged: (v) => setDialogState(() => selectedRootCause = v),
+                            onAddNew: () async {
+                              final newCause = await _showAddNewOptionDialog('ROOT CAUSE');
+                              if (newCause != null && newCause.isNotEmpty) {
+                                await _dbHelper.insertFaultOption('root_cause', newCause);
+                                final updated = await _dbHelper.getFaultOptions('root_cause');
+                                setDialogState(() {
+                                  rootCauses = updated;
+                                  selectedRootCause = newCause;
+                                });
+                              }
+                            },
+                            onDelete: (val) async {
+                              final confirm = await _showDeleteOptionConfirmation('ROOT CAUSE', val);
+                              if (confirm == true) {
+                                await _dbHelper.deleteFaultOption('root_cause', val);
+                                final updated = await _dbHelper.getFaultOptions('root_cause');
+                                setDialogState(() {
+                                  rootCauses = updated;
+                                  if (selectedRootCause == val) selectedRootCause = null;
+                                });
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Priority & Reporter
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildModernDropdown(
+                                  label: 'PRIORITY',
+                                  value: selectedPriority,
+                                  items: priorities,
+                                  icon: Icons.priority_high_rounded,
+                                  onChanged: (v) => setDialogState(() => selectedPriority = v),
+                                  color: _getPriorityColor(selectedPriority),
+                                  onAddNew: () async {
+                                    final newPri = await _showAddNewOptionDialog('PRIORITY');
+                                    if (newPri != null && newPri.isNotEmpty) {
+                                      await _dbHelper.insertFaultOption('priority', newPri);
+                                      final updated = await _dbHelper.getFaultOptions('priority');
+                                      setDialogState(() {
+                                        priorities = updated;
+                                        selectedPriority = newPri;
+                                      });
+                                    }
+                                  },
+                                  onDelete: (val) async {
+                                    final confirm = await _showDeleteOptionConfirmation('PRIORITY', val);
+                                    if (confirm == true) {
+                                      await _dbHelper.deleteFaultOption('priority', val);
+                                      final updated = await _dbHelper.getFaultOptions('priority');
+                                      setDialogState(() {
+                                        priorities = updated;
+                                        if (selectedPriority == val) selectedPriority = null;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildModernTextField(
+                                  controller: reporterController,
+                                  label: 'REPORTING PERSON',
+                                  icon: Icons.person_outline_rounded,
+                                  color: Colors.blue.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Status Section
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: isFixed ? Colors.green.shade50 : Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: isFixed ? Colors.green.shade100 : Colors.red.shade100),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'CURRENT STATUS',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey.shade600,
+                                        letterSpacing: 0.8,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 12,
+                                          height: 12,
+                                          decoration: BoxDecoration(
+                                            color: isFixed ? Colors.green : Colors.red,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: (isFixed ? Colors.green : Colors.red).withOpacity(0.3),
+                                                blurRadius: 4,
+                                                spreadRadius: 1,
+                                              )
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          isFixed ? 'CLOSED' : 'OPEN',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: isFixed ? Colors.green.shade700 : Colors.red.shade700,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      isFixed ? 'MARK AS OPEN' : 'MARK AS CLOSED',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Transform.scale(
+                                      scale: 0.85,
+                                      child: Switch(
+                                        value: isFixed,
+                                        activeColor: Colors.green,
+                                        onChanged: (v) => setDialogState(() => isFixed = v),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Repair info Section (Only visible when status is CLOSED)
+                          if (isFixed) ...[
+                            Row(
+                              children: [
+                                Text(
+                                  'REPAIR DETAILS',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey.shade600,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(child: Divider(color: Colors.grey.shade300)),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildModernDateTimePicker(
+                                    label: 'REPAIR START',
+                                    date: startDate,
+                                    time: startTime,
+                                    color: Colors.blue.shade600,
+                                    icon: Icons.play_arrow_rounded,
+                                    onTap: () async {
+                                      final DateTime? d = await _showModernDatePicker(startDate, Colors.blue);
+                                      if (d != null) {
+                                        final TimeOfDay? t = await _showModernTimePicker(startTime, Colors.blue);
+                                        if (t != null) {
+                                          setDialogState(() {
+                                            startDate = d;
+                                            startTime = t;
+                                          });
+                                        }
+                                      }
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: _buildModernDateTimePicker(
+                                    label: 'REPAIR END',
+                                    date: endDate,
+                                    time: endTime,
+                                    color: Colors.green.shade600,
+                                    icon: Icons.check_circle_outline_rounded,
+                                    onTap: () async {
+                                      final DateTime? d = await _showModernDatePicker(endDate, Colors.green);
+                                      if (d != null) {
+                                        final TimeOfDay? t = await _showModernTimePicker(endTime, Colors.green);
+                                        if (t != null) {
+                                          setDialogState(() {
+                                            endDate = d;
+                                            endTime = t;
+                                          });
+                                        }
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            
+                            _buildModernDropdown(
+                              label: 'REPAIRED BY',
+                              value: selectedRepairedBy,
+                              items: repairedByOptions,
+                              icon: Icons.engineering_outlined,
+                              onChanged: (v) => setDialogState(() => selectedRepairedBy = v),
+                              color: Colors.blueGrey.shade700,
+                              onAddNew: () async {
+                                final newRepairer = await _showAddNewOptionDialog('REPAIRED BY');
+                                if (newRepairer != null && newRepairer.isNotEmpty) {
+                                  await _dbHelper.insertFaultOption('repaired_by', newRepairer);
+                                  final updated = await _dbHelper.getFaultOptions('repaired_by');
+                                  setDialogState(() {
+                                    repairedByOptions = updated;
+                                    selectedRepairedBy = newRepairer;
+                                  });
+                                }
+                              },
+                              onDelete: (val) async {
+                                final confirm = await _showDeleteOptionConfirmation('REPAIRED BY', val);
+                                if (confirm == true) {
+                                  await _dbHelper.deleteFaultOption('repaired_by', val);
+                                  final updated = await _dbHelper.getFaultOptions('repaired_by');
+                                  setDialogState(() {
+                                    repairedByOptions = updated;
+                                    if (selectedRepairedBy == val) selectedRepairedBy = null;
+                                  });
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                          
+                          // Total Downtime Footer
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.blue.shade100),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.timer_outlined, color: Colors.blue.shade700, size: 20),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      'TOTAL DOWNTIME',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade900,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  '$downtime min',
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    
-                    // Editable fields
-                    _buildModernTextField(
-                      controller: descController,
-                      label: 'DESCRIPTION OF THE FAULT',
-                      icon: Icons.description_outlined,
-                      color: Colors.blue,
+                  ),
+
+                  // Actions
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
                     ),
-                    const SizedBox(height: 16),
-                    
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        value: selectedLocation,
-                        hint: const Text('Select Location', style: TextStyle(fontSize: 13)),
-                        decoration: const InputDecoration(
-                          labelText: 'LOCATION',
-                          labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                          floatingLabelBehavior: FloatingLabelBehavior.always,
-                          border: InputBorder.none,
-                          prefixIcon: Icon(Icons.location_on_outlined, color: Colors.blue, size: 20),
-                        ),
-                        items: _lokalizacjaOptions.map((l) => DropdownMenuItem(value: l, child: Text(l, style: const TextStyle(fontSize: 13)))).toList(),
-                        onChanged: (v) => setDialogState(() => selectedLocation = v),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    _buildModernTextField(
-                      controller: rootCauseController,
-                      label: 'ROOT CAUSE',
-                      icon: Icons.question_mark_outlined,
-                      color: Colors.blue,
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    Row(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.05),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                            ),
-                            child: DropdownButtonFormField<String>(
-                              value: selectedPriority,
-                              hint: const Text('Priority', style: TextStyle(fontSize: 13)),
-                              decoration: const InputDecoration(
-                                labelText: 'PRIORITY',
-                                labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                floatingLabelBehavior: FloatingLabelBehavior.always,
-                                border: InputBorder.none,
-                                prefixIcon: Icon(Icons.priority_high, color: Colors.blue, size: 20),
-                              ),
-                              items: ['Low', 'Medium', 'High', 'Critical'].map((p) => DropdownMenuItem(value: p, child: Text(p, style: const TextStyle(fontSize: 13)))).toList(),
-                              onChanged: (v) => setDialogState(() => selectedPriority = v),
-                            ),
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            side: BorderSide(color: Colors.grey.shade300),
                           ),
+                          child: Text(s.t('cancel'), style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildModernTextField(
-                            controller: reporterController,
-                            label: 'REPORTING PERSON',
-                            icon: Icons.person_outline,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    
-                    // Repair info
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildModernDateTimePicker(
-                            label: 'REPAIR START',
-                            date: startDate,
-                            time: startTime,
-                            color: Colors.blue,
-                            icon: Icons.play_arrow_rounded,
-                            onTap: () async {
-                              final DateTime? d = await _showModernDatePicker(startDate, Colors.blue);
-                              if (d != null) {
-                                final TimeOfDay? t = await _showModernTimePicker(startTime, Colors.blue);
-                                if (t != null) {
-                                  setDialogState(() {
-                                    startDate = d;
-                                    startTime = t;
-                                  });
-                                }
+                        const SizedBox(width: 16),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.save_rounded, size: 20),
+                          onPressed: () async {
+                            if (descController.text.isEmpty || selectedLocation == null || selectedPriority == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Description, Location and Priority are required'), backgroundColor: Colors.red),
+                              );
+                              return;
+                            }
+                            // Save to failure_reports
+                            final reportData = {
+                              'unique_id': faultId,
+                              'opis': descController.text,
+                              'lokalizacja': selectedLocation,
+                              'linia': _selectedLine ?? '-',
+                              'powod': selectedRootCause ?? '',
+                              'priorytet': selectedPriority ?? 'Medium',
+                              'status': isFixed ? 'CLOSED' : 'OPEN',
+                              'czy_rozwiazane': isFixed ? 1 : 0,
+                              'data_rozpoczecia_naprawy': '${DateFormat('yyyy-MM-dd').format(startDate)} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
+                              'data_zakonczenia_naprawy': isFixed ? '${DateFormat('yyyy-MM-dd').format(endDate)} ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}' : null,
+                              'downtime_minutes': downtime,
+                              'created_by': reporterController.text,
+                              'kto_naprawil': selectedRepairedBy ?? '',
+                              'zdjecie_blob': photoBytes,
+                              'created_at': DateTime(regDate.year, regDate.month, regDate.day, regTime.hour, regTime.minute).toIso8601String(),
+                            };
+                            
+                            final failureId = await _dbHelper.insertFailureReport(reportData);
+                            
+                            // Refresh local photos to get the one we just added with its ID
+                            final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                            final reports = await _dbHelper.getFailureReports();
+                            final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
+                            final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+                            
+                            final newPhotos = reasonReports
+                                .where((r) => r['zdjecie_blob'] != null)
+                                .map((r) => {
+                                  'id': r['id'],
+                                  'bytes': r['zdjecie_blob'] as Uint8List,
+                                  'description': r['opis'] as String? ?? '',
+                                })
+                                .toList();
+
+                            // Also insert a task for this failure
+                            await _dbHelper.insertTask({
+                              'title': _selectedLine ?? '-',
+                              'status': isFixed ? 'Zrealizowane' : 'W toku',
+                              'type': 'Technical Fault: ${descController.text}',
+                              'priority': selectedPriority,
+                              'date_start': startDate.toIso8601String(),
+                              'label': reporterController.text,
+                              'created_at': now.toIso8601String(),
+                              'created_by': widget.currentUsername,
+                              'failure_id': failureId,
+                            });
+
+                            // Update the local state for the production list
+                            if (downtime > 0) {
+                              await _saveDowntimeEntry(reason, downtime, absoluteMinutes: (_downtimeData[reason] ?? 0) + downtime);
+                              if (mounted) {
+                                setState(() {
+                                  _downtimeData[reason] = (_downtimeData[reason] ?? 0) + downtime;
+                                  _downtimeControllers[reason]?.text = _downtimeData[reason].toString();
+                                  _reasonPhotos[reason] = newPhotos;
+                                });
                               }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildModernDateTimePicker(
-                            label: 'REPAIR END',
-                            date: endDate,
-                            time: endTime,
-                            color: Colors.green,
-                            icon: Icons.stop_rounded,
-                            onTap: () async {
-                              final DateTime? d = await _showModernDatePicker(endDate, Colors.green);
-                              if (d != null) {
-                                final TimeOfDay? t = await _showModernTimePicker(endTime, Colors.green);
-                                if (t != null) {
-                                  setDialogState(() {
-                                    endDate = d;
-                                    endTime = t;
-                                  });
-                                }
+                            } else {
+                              if (mounted) {
+                                setState(() {
+                                  _reasonPhotos[reason] = newPhotos;
+                                });
                               }
-                            },
+                            }
+                            
+                            if (context.mounted) Navigator.pop(context);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade700,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 4,
+                            shadowColor: Colors.blue.withOpacity(0.5),
                           ),
+                          label: Text(s.t('save').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.1)),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    
-                    _buildModernTextField(
-                      controller: repairedByController,
-                      label: 'REPAIRED BY',
-                      icon: Icons.engineering_outlined,
-                      color: Colors.blueGrey,
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Status and Downtime
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            const Text('IS REPAIRED?'),
-                            Switch(
-                              value: isFixed,
-                              onChanged: (v) => setDialogState(() => isFixed = v),
-                            ),
-                            Text(isFixed ? 'Closed' : 'Open', style: TextStyle(fontWeight: FontWeight.bold, color: isFixed ? Colors.green : Colors.red)),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            const Text('DOWNTIME', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                            Text('$downtime min', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: Text(s.t('cancel'))),
-              ElevatedButton(
-                onPressed: () async {
-                  if (descController.text.isEmpty || selectedLocation == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Description and Location are required'), backgroundColor: Colors.red),
-                    );
-                    return;
-                  }
-                  // Save to failure_reports
-                  final reportData = {
-                    'unique_id': faultId,
-                    'opis': descController.text,
-                    'lokalizacja': selectedLocation,
-                    'linia': _selectedLine ?? '-',
-                    'powod': rootCauseController.text,
-                    'priorytet': selectedPriority ?? 'Medium',
-                    'status': isFixed ? 'Closed' : 'Open',
-                    'czy_rozwiazane': isFixed ? 1 : 0,
-                    'data_rozpoczecia_naprawy': '${DateFormat('yyyy-MM-dd').format(startDate)} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
-                    'data_zakonczenia_naprawy': isFixed ? '${DateFormat('yyyy-MM-dd').format(endDate)} ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}' : null,
-                    'downtime_minutes': downtime,
-                    'created_by': reporterController.text,
-                    'kto_naprawil': repairedByController.text,
-                    'zdjecie_blob': photoBytes,
-                    'created_at': regDate.toIso8601String(),
-                  };
-                  
-                  final failureId = await _dbHelper.insertFailureReport(reportData);
-                  
-                  // Also insert a task for this failure
-                  await _dbHelper.insertTask({
-                    'title': _selectedLine ?? '-',
-                    'status': isFixed ? 'Zrealizowane' : 'W toku',
-                    'type': 'Technical Fault: ${descController.text}',
-                    'priority': selectedPriority,
-                    'date_start': startDate.toIso8601String(),
-                    'label': reporterController.text,
-                    'created_at': now.toIso8601String(),
-                    'created_by': widget.currentUsername,
-                    'failure_id': failureId,
-                  });
-
-                  // Update the local state for the production list
-                  if (downtime > 0) {
-                    await _saveDowntimeEntry(reason, downtime, absoluteMinutes: (_downtimeData[reason] ?? 0) + downtime);
-                    if (mounted) {
-                      setState(() {
-                        _downtimeData[reason] = (_downtimeData[reason] ?? 0) + downtime;
-                        _downtimeControllers[reason]?.text = _downtimeData[reason].toString();
-                      });
-                    }
-                  }
-                  
-                  if (context.mounted) Navigator.pop(context);
-                },
-                child: Text(s.t('save')),
-              ),
-            ],
           );
         },
       ),
@@ -1214,44 +1688,36 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.2)),
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, size: 14, color: color),
+                Icon(icon, size: 14, color: Colors.grey.shade600),
                 const SizedBox(width: 6),
                 Text(
-                  label,
+                  label.toUpperCase(),
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: color.withOpacity(0.8),
-                    letterSpacing: 0.5,
+                    color: Colors.grey.shade500,
+                    letterSpacing: 0.8,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
-              '${DateFormat('dd MMM yyyy').format(date)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            Text(
-              '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 12,
-                color: Colors.grey.shade700,
-              ),
+              '${DateFormat('yyyy-MM-dd').format(date)} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
             ),
           ],
         ),
@@ -1264,29 +1730,222 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     required String label,
     required IconData icon,
     required Color color,
+    int maxLines = 1,
   }) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: color.withOpacity(0.8), fontWeight: FontWeight.bold, fontSize: 12),
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        prefixIcon: Icon(icon, color: color, size: 20),
-        filled: true,
-        fillColor: color.withOpacity(0.05),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: color.withOpacity(0.2)),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade500,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          TextField(
+            controller: controller,
+            maxLines: maxLines,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required IconData icon,
+    required ValueChanged<String?> onChanged,
+    Color? color,
+    VoidCallback? onAddNew,
+    Function(String)? onDelete,
+  }) {
+    final effectiveColor = color ?? Colors.blue.shade700;
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Text(
+                    label.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade500,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+              if (onAddNew != null)
+                InkWell(
+                  onTap: onAddNew,
+                  child: Icon(Icons.add_circle_outline_rounded, size: 18, color: effectiveColor),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              isDense: true,
+              hint: Text('SELECT $label', style: TextStyle(fontSize: 14, color: Colors.grey.shade400)),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+              icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+              items: items.map((l) => DropdownMenuItem(
+                value: l, 
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(l),
+                    if (onDelete != null)
+                      GestureDetector(
+                        onTap: () => onDelete(l),
+                        child: Icon(Icons.remove_circle_outline, color: Colors.red.shade300, size: 18),
+                      ),
+                  ],
+                )
+              )).toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(String label, String value, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(
+              label.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade500,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ],
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: color.withOpacity(0.2)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: color, width: 1.5),
+      ],
+    );
+  }
+
+  Color _getPriorityColor(String? priority) {
+    if (priority == null) return Colors.blue.shade600;
+    switch (priority.toLowerCase()) {
+      case 'low': return Colors.green.shade600;
+      case 'medium': return Colors.blue.shade600;
+      case 'high': return Colors.orange.shade700;
+      case 'critical': return Colors.red.shade700;
+      default: return Colors.blue.shade600;
+    }
+  }
+
+  Future<String?> _showAddNewOptionDialog(String label) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('ADD NEW $label'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Enter new $label name...',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade700,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('ADD'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _showDeleteOptionConfirmation(String label, String value) async {
+    final s = AppStrings.of(context);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.t('confirmDelete').toUpperCase()),
+        content: Text('${s.t('deleteElementConfirm')} ("$value")'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(s.t('cancel').toUpperCase()),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(s.t('delete').toUpperCase()),
+          ),
+        ],
       ),
     );
   }
@@ -1556,10 +2215,10 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     }
   }
 
-  Future<void> _syncToFailureRegister(String reason, int totalMinutes, String dateStr, {Uint8List? photoBytes}) async {
+  Future<void> _syncToFailureRegister(String reason, int totalMinutes, String dateStr, {Uint8List? photoBytes, String? description, String? overrideSyncId}) async {
     // Generate a unique ID for this downtime event to prevent duplicates
     // Pattern: PL-[Line]-[Date]-[Reason]-[Shift]
-    final syncId = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
+    final syncId = overrideSyncId ?? 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
     
     debugPrint('DEBUG: Syncing to Failure Register. SyncID: $syncId, Total Minutes: $totalMinutes');
 
@@ -1573,7 +2232,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
 
       final Map<String, dynamic> updateData = {
         'downtime_minutes': totalMinutes,
-        'opis': 'Storing List Downtime: $reason',
+        'opis': description ?? 'Storing List Downtime: $reason',
         'status': 'ZAMKNIĘTY',
         'czy_rozwiazane': 1,
       };
@@ -1599,7 +2258,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         // Create new failure report
         final Map<String, dynamic> insertData = {
           'unique_id': syncId,
-          'opis': 'Storing List Downtime: $reason',
+          'opis': description ?? 'Storing List Downtime: $reason',
           'lokalizacja': _selectedLine,
           'linia': _selectedLine,
           'powod': reason,
@@ -1741,58 +2400,104 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                     children: [
                                       Expanded(
                                         child: Container(
-                                          height: 42,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                           decoration: BoxDecoration(
-                                            border: Border.all(color: Colors.grey.shade300),
-                                            borderRadius: BorderRadius.circular(8),
+                                            color: Colors.grey.shade50,
+                                            borderRadius: BorderRadius.circular(16),
+                                            border: Border.all(color: Colors.grey.shade200),
                                           ),
-                                          child: Autocomplete<String>(
-                                            key: ValueKey('autocomplete_operator_${index}_${_savedNames.length}'),
-                                            initialValue: TextEditingValue(text: controller.text),
-                                            optionsBuilder: (TextEditingValue textEditingValue) {
-                                              if (textEditingValue.text.isEmpty) {
-                                                return _savedNames;
-                                              }
-                                              return _savedNames.where((String option) {
-                                                return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
-                                              });
-                                            },
-                                            onSelected: (String selection) {
-                                              controller.text = selection;
-                                              _triggerAutoSave();
-                                            },
-                                            fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
-                                              if (textController.text != controller.text) {
-                                                textController.text = controller.text;
-                                              }
-                                              return TextField(
-                                                controller: textController,
-                                                focusNode: focusNode,
-                                                style: const TextStyle(fontSize: 13),
-                                                decoration: InputDecoration(
-                                                  isDense: true,
-                                                  contentPadding: EdgeInsets.zero,
-                                                  border: InputBorder.none,
-                                                  hintText: s.t('operator'),
-                                                ),
-                                                onChanged: (v) {
-                                                  controller.text = v;
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Icon(Icons.person_outline, size: 14, color: Colors.grey.shade600),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    s.t('operator').toUpperCase(),
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Colors.grey.shade500,
+                                                      letterSpacing: 0.8,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Autocomplete<String>(
+                                                key: ValueKey('autocomplete_operator_${index}_${_savedNames.length}'),
+                                                initialValue: TextEditingValue(text: controller.text),
+                                                optionsBuilder: (TextEditingValue textEditingValue) {
+                                                  if (textEditingValue.text.isEmpty) {
+                                                    return _savedNames;
+                                                  }
+                                                  return _savedNames.where((String option) {
+                                                    return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                                                  });
+                                                },
+                                                onSelected: (String selection) {
+                                                  controller.text = selection;
                                                   _triggerAutoSave();
                                                 },
-                                              );
-                                            },
+                                                fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+                                                  if (textController.text != controller.text) {
+                                                    textController.text = controller.text;
+                                                  }
+                                                  return TextField(
+                                                    controller: textController,
+                                                    focusNode: focusNode,
+                                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                                    decoration: const InputDecoration(
+                                                      isDense: true,
+                                                      contentPadding: EdgeInsets.zero,
+                                                      border: InputBorder.none,
+                                                    ),
+                                                    onChanged: (v) {
+                                                      controller.text = v;
+                                                      _triggerAutoSave();
+                                                    },
+                                                  );
+                                                },
+                                              ),
+                                            ],
                                           ),
                                         ),
                                       ),
                                       if (index > 0)
                                         IconButton(
                                           icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                                          onPressed: () => setState(() {
-                                            _operatorControllers[index].dispose();
-                                            _operatorControllers.removeAt(index);
-                                            _triggerAutoSave();
-                                          }),
+                                          onPressed: () async {
+                                            final confirm = await showDialog<bool>(
+                                              context: context,
+                                              builder: (context) => AlertDialog(
+                                                title: Text(s.t('confirmDelete').toUpperCase()),
+                                                content: Text(s.t('deleteElementConfirm')),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () => Navigator.pop(context, false),
+                                                    child: Text(s.t('cancel').toUpperCase()),
+                                                  ),
+                                                  ElevatedButton(
+                                                    onPressed: () => Navigator.pop(context, true),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.red.shade700,
+                                                      foregroundColor: Colors.white,
+                                                    ),
+                                                    child: Text(s.t('delete').toUpperCase()),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+
+                                            if (confirm == true) {
+                                              setState(() {
+                                                _operatorControllers[index].dispose();
+                                                _operatorControllers.removeAt(index);
+                                                _triggerAutoSave();
+                                              });
+                                            }
+                                          },
                                         ),
                                     ],
                                   ),
@@ -1802,9 +2507,6 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                               const SizedBox(height: 24),
                               
                               // Date Selection
-                              Text(s.t('date').toUpperCase(),
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
-                              const SizedBox(height: 8),
                               InkWell(
                                 onTap: () async {
                                   final picked = await showDatePicker(
@@ -1820,16 +2522,31 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                 },
                                 child: Container(
                                   width: 180,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey.shade400),
-                                    borderRadius: BorderRadius.circular(8),
+                                    color: Colors.grey.shade50,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.grey.shade200),
                                   ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
-                                      const SizedBox(width: 8),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade600),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            s.t('date').toUpperCase(),
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.grey.shade500,
+                                              letterSpacing: 0.8,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
                                       Text(dateStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                     ],
                                   ),
@@ -2083,17 +2800,47 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                             child: _reasonPhotos[reason]?.isNotEmpty ?? false
                                 ? GestureDetector(
                                     onTap: () => _showFullImage(reason),
-                                    child: Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.blue.shade200),
-                                        image: DecorationImage(
-                                          image: MemoryImage(_reasonPhotos[reason]!.first),
-                                          fit: BoxFit.cover,
+                                    child: Stack(
+                                      children: [
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: Colors.blue.shade200),
+                                            image: DecorationImage(
+                                              image: MemoryImage(_reasonPhotos[reason]!.first['bytes']),
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                        if (_reasonPhotos[reason]!.length > 1)
+                                          Positioned.fill(
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withOpacity(0.4),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  '+${_reasonPhotos[reason]!.length}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    shadows: [
+                                                      Shadow(
+                                                        blurRadius: 4,
+                                                        color: Colors.black,
+                                                        offset: Offset(0, 1),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   )
                                 : Container(
@@ -2115,9 +2862,20 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                             style: const TextStyle(fontSize: 11),
                             decoration: InputDecoration(
                               isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              fillColor: Colors.white,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(color: Colors.grey.shade200),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(color: Colors.grey.shade200),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(color: Colors.blue.shade300, width: 1.5),
+                              ),
+                              fillColor: Colors.grey.shade50,
                               filled: true,
                             ),
                             onChanged: (v) => _updateOtherFields(),
@@ -2164,14 +2922,18 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                                 decoration: InputDecoration(
                                   isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
                                   border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: minutes > 0 ? Colors.blue.shade200 : Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(color: minutes > 0 ? Colors.blue.shade200 : Colors.grey.shade200),
                                   ),
                                   enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
+                                    borderRadius: BorderRadius.circular(16),
                                     borderSide: BorderSide(color: minutes > 0 ? Colors.blue.shade100 : Colors.grey.shade200),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(color: minutes > 0 ? Colors.blue : Colors.blue.shade300, width: 1.5),
                                   ),
                                   fillColor: minutes > 0 ? Colors.blue.shade50 : Colors.grey.shade50,
                                   filled: true,
@@ -2669,7 +3431,15 @@ class _DowntimeShiftTileState extends State<_DowntimeShiftTile> {
 
 class ImageEditorScreen extends StatefulWidget {
   final Uint8List imageBytes;
-  const ImageEditorScreen({super.key, required this.imageBytes});
+  final String? initialDescription;
+  final bool showDescription;
+
+  const ImageEditorScreen({
+    super.key, 
+    required this.imageBytes,
+    this.initialDescription,
+    this.showDescription = true,
+  });
 
   @override
   State<ImageEditorScreen> createState() => _ImageEditorScreenState();
@@ -2681,6 +3451,19 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   Color _currentColor = Colors.red;
   double _currentWidth = 4.0;
   bool _isEraser = false;
+  late TextEditingController _descriptionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController(text: widget.initialDescription);
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2769,6 +3552,41 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                 _widthPicker(4.0),
                 _widthPicker(8.0),
               ],
+            ),
+          ),
+          // Description Field
+          if (widget.showDescription)
+            Container(
+              color: Colors.grey.shade900,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: TextField(
+              controller: _descriptionController,
+              maxLines: 2,
+              minLines: 1,
+              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                hintText: s.t('description'),
+                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Icon(Icons.edit_note_rounded, color: Colors.blue.shade400, size: 28),
+                ),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.15),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: Colors.blue.withOpacity(0.3), width: 1),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: Colors.blue.shade400, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              ),
             ),
           ),
           // Modern Action Buttons
@@ -2863,7 +3681,12 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData != null) {
-        if (mounted) Navigator.pop(context, byteData.buffer.asUint8List());
+        if (mounted) {
+          Navigator.pop(context, {
+            'image': byteData.buffer.asUint8List(),
+            'description': _descriptionController.text.trim(),
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error saving edited image: $e');

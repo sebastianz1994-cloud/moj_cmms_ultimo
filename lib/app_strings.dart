@@ -399,6 +399,7 @@ class AppStrings {
       'multiplier': 'Multiplier',
       'confirmDelete': 'Confirm Delete',
       'deleteConfirmMessage': 'Are you sure you want to delete',
+      'deleteElementConfirm': 'Are you sure you want to delete this element?',
       'listEmpty': 'List is empty',
     },
     'pl': {
@@ -736,6 +737,7 @@ class AppStrings {
       'multiplier': 'Mnożnik',
       'confirmDelete': 'Potwierdź usunięcie',
       'deleteConfirmMessage': 'Czy na pewno chcesz usunąć',
+      'deleteElementConfirm': 'Czy na pewno jesteś pewny, że chcesz usunąć element?',
       'listEmpty': 'Lista jest pusta',
     },
     'nl': {
@@ -937,6 +939,7 @@ class AppStrings {
       'multiplier': 'Vermenigvuldiger',
       'confirmDelete': 'Verwijdering bevestigen',
       'deleteConfirmMessage': 'Weet u zeker dat u wilt verwijderen',
+      'deleteElementConfirm': 'Weet u zeker dat u dit element wilt verwijderen?',
       'listEmpty': 'Lijst jest pusta',
     },
     'tr': {
@@ -1015,6 +1018,7 @@ class AppStrings {
       'tfBesturingsprobleem': 'Kontrol problemi',
       'faultCount': 'Arıza Sayısı',
       'iceWater': 'Buz / Su',
+      'comments': 'Yorumlar',
       'emergencyName': 'Ad / Departman',
       'phoneNumber': 'Telefon Numarası',
       'emergencyCategory': 'Kategori (örn. Teknoloji, Güvenlik)',
@@ -1096,6 +1100,7 @@ class AppStrings {
       'multiplier': 'Çarpan',
       'confirmDelete': 'Silmeyi Onayla',
       'deleteConfirmMessage': 'Silmek istediğinizden emin misiniz?',
+      'deleteElementConfirm': 'Bu öğeyi silmek istediğinizden emin misiniz?',
       'listEmpty': 'Liste boş',
     },
     'bg': {
@@ -1169,6 +1174,7 @@ class AppStrings {
       'tfBesturingsprobleem': 'Проблем с управлението',
       'faultCount': 'Брой неизправности',
       'iceWater': 'Лед / Вода',
+      'comments': 'Коментари',
       'emergencyNumbers': 'Спешни номера',
       'emergencyName': 'Име / Отдел',
       'phoneNumber': 'Телефонен номер',
@@ -1251,6 +1257,7 @@ class AppStrings {
       'multiplier': 'Множител',
       'confirmDelete': 'Потвърди изтриването',
       'deleteConfirmMessage': 'Сигурни ли сте, че искате да изтриете',
+      'deleteElementConfirm': 'Сигурни ли сте, че искате да изтриετε този елемент?',
       'listEmpty': 'Списъкът е празен',
     },
     'el': {
@@ -1324,6 +1331,7 @@ class AppStrings {
       'settings': 'Ρυθμίσεις',
       'faultCount': 'Αριθμός βλαβών',
       'iceWater': 'Πάγος / Νερό',
+      'comments': 'Σχόλια',
       'emergencyNumbers': 'Αριθμοί Έκτακτης Ανάγκης',
       'emergencyName': 'Όνομα / Τμήμα',
       'phoneNumber': 'Αριθμός Τηλεφώνου',
@@ -1405,7 +1413,8 @@ class AppStrings {
       'editBarrelType': 'Επεξεργασία τύπου βαρελιού',
       'multiplier': 'Πολλαπλασιαστής',
       'confirmDelete': 'Επιβεβαίωση διαγραφής',
-      'deleteConfirmMessage': 'Είστε σίγουροι ότι θέλετε να διαγράψετε;',
+      'deleteConfirmMessage': 'Είστε σίγουροι ότι θέλετε να διαγράψετε',
+      'deleteElementConfirm': 'Είστε σίγουροι ότι θέλετε να διαγράψετε αυτό το στοιχείο;',
       'listEmpty': 'Η λίστα είναι κενή',
     },
   };
