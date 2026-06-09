@@ -1035,6 +1035,13 @@ class DBHelper {
     _backupTable('tasks', 'tasks');
   }
 
+  Future<void> deleteTaskByFailureId(int failureId) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.delete('tasks', where: 'failure_id = ?', whereArgs: [failureId]);
+    _backupTable('tasks', 'tasks');
+  }
+
   Future<void> deleteTask(int id) async {
     if (kIsWeb) return;
     final db = await database;
@@ -1672,6 +1679,40 @@ class DBHelper {
     final res = await db.update('failure_reports', report, where: 'id = ?', whereArgs: [id]);
     _backupTable('failure_reports', 'failures');
     return res;
+  }
+
+  Future<void> deleteProductionDowntimeByCriteria({
+    required String lineName,
+    required String date,
+    required String reason,
+    required String shift,
+  }) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.delete(
+      'production_downtime',
+      where: 'line_name = ? AND date = ? AND reason = ? AND shift = ?',
+      whereArgs: [lineName, date, reason, shift],
+    );
+    _backupTable('production_downtime', 'production_list');
+  }
+
+  Future<void> deleteFailureReportsByUniqueIdPrefix(String prefix) async {
+    if (kIsWeb) return;
+    final db = await database;
+    // Delete failure reports
+    await db.delete(
+      'failure_reports',
+      where: 'unique_id = ? OR unique_id LIKE ?',
+      whereArgs: [prefix, '$prefix-%'],
+    );
+    // Delete associated tasks
+    await db.delete(
+      'tasks',
+      where: 'failure_id NOT IN (SELECT id FROM failure_reports)',
+    );
+    _backupTable('failure_reports', 'failure_reports');
+    _backupTable('tasks', 'tasks');
   }
 
   Future<void> deleteFailureReport(int id) async {

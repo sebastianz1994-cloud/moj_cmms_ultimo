@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../app_strings.dart';
 import '../database/db_helper.dart';
+import '../utils/time_utils.dart';
 import '../utils/file_export.dart' as exporter;
 
 import 'package:image_picker/image_picker.dart';
@@ -17,6 +18,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/gestures.dart';
+
+import '../widgets/loading_overlay.dart';
 
 class ProductionListScreen extends StatefulWidget {
   const ProductionListScreen({
@@ -368,7 +371,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         ..._pollutionReasons,
         ..._processReasons,
         ..._technicalFaultReasons,
-      ];
+      ].map((r) => r.trim()).where((r) => r.isNotEmpty).toSet().toList();
       for (final reason in _reasons) {
         _downtimeData.putIfAbsent(reason, () => 0);
         _commentControllers.putIfAbsent(reason, () => TextEditingController());
@@ -421,6 +424,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     debugPrint('DEBUG: Loading downtime for Date: $dateStr, Line: $_selectedLine, Shift: $_selectedShift');
     
     setState(() => _isLoading = true);
+    LoadingOverlay.show(context, message: 'Loading data...');
 
     try {
       final operatorNames = _operatorControllers
@@ -434,7 +438,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         operatorName: currentOp,
         lineName: _selectedLine,
         shift: _selectedShift,
-        last8Hours: true, 
+        last8Hours: false, // Changed to false to ensure we see all data for the day when refreshing
       );
 
       // Fetch photos before setState
@@ -442,14 +446,30 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       final Map<String, List<Map<String, dynamic>>> fetchedPhotos = {};
       for (final reason in _reasons) {
         final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
-        final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+        final reasonReports = reports.where((r) {
+          final uid = r['unique_id']?.toString() ?? '';
+          // Only include actual sub-reports (Technical Faults or Photo-only), 
+          // exclude the summary report which has the exact syncIdPrefix
+          return uid.startsWith('$syncIdPrefix-');
+        }).toList();
         
         fetchedPhotos[reason] = reasonReports
-            .where((r) => r['zdjecie_blob'] != null)
             .map((r) => {
               'id': r['id'],
-              'bytes': r['zdjecie_blob'] as Uint8List,
+              'bytes': r['zdjecie_blob'] as Uint8List?,
               'description': r['opis'] as String? ?? '',
+              'linia': r['linia'],
+              'lokalizacja': r['lokalizacja'],
+              'powod': r['powod'],
+              'priorytet': r['priorytet'],
+              'status': r['status'],
+              'data_rozpoczecia_naprawy': r['data_rozpoczecia_naprawy'],
+              'data_zakonczenia_naprawy': r['data_zakonczenia_naprawy'],
+              'downtime_minutes': r['downtime_minutes'],
+              'created_by': r['created_by'],
+              'kto_naprawil': r['kto_naprawil'],
+              'created_at': r['created_at'],
+              'unique_id': r['unique_id'],
             })
             .toList();
       }
@@ -493,10 +513,14 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
           }
           _isLoading = false;
         });
+        LoadingOverlay.hide(context);
       }
     } catch (e) {
       debugPrint('DEBUG Error loading downtime: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        LoadingOverlay.hide(context);
+      }
     }
   }
 
@@ -565,10 +589,6 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     final now = DateTime.now();
     final year = now.year;
     
-    // ISO week number calculation
-    final dayOfYear = int.parse(DateFormat('D').format(now));
-    final week = ((dayOfYear - now.weekday + 10) / 7).floor();
-    
     // Get count of reports for the current year
     final reports = await _dbHelper.getFailureReports();
     final currentYearReports = reports.where((r) {
@@ -577,9 +597,12 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     }).length;
     
     final count = currentYearReports + 1;
-    final paddedCount = count.toString().padLeft(3, '0');
     
-    return '$paddedCount/W$week/$year';
+    return TimeUtils.formatFaultId(
+      line: _selectedLine,
+      count: count,
+      date: now,
+    );
   }
 
   void _showFullImage(String currentReason) {
@@ -602,6 +625,11 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     // Tracking current photo within the current reason
     int currentPhotoIndex = 0;
     
+    // Filter out reports without photos for the image viewer
+    final photos = (_reasonPhotos[currentReason] ?? []).where((p) => p['bytes'] != null).toList();
+    
+    if (photos.isEmpty) return;
+
     // Position and Scale for the comment frame
     Offset commentOffset = const Offset(20, 100); // Initial bottom-left-ish
     double commentScale = 1.0;
@@ -611,8 +639,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           final currentReasonStr = photoReasons[currentReasonIndex];
-          // Ensure we have the latest list from the parent state
-          final photos = _reasonPhotos[currentReasonStr] ?? [];
+          // Filter out reports without photos for the image viewer
+          final photos = (_reasonPhotos[currentReasonStr] ?? []).where((p) => p['bytes'] != null).toList();
           
           if (photos.isEmpty) {
             return Center(
@@ -653,7 +681,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                    child: InteractiveViewer(
                      key: ValueKey('${currentReasonStr}_${currentPhotoIndex}'),
                      child: Image.memory(
-                       photos[currentPhotoIndex]['bytes'],
+                       photos[currentPhotoIndex]['bytes'] as Uint8List,
                        fit: BoxFit.contain,
                      ),
                    ),
@@ -692,41 +720,16 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                               IconButton(
                                 icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 30),
                                 onPressed: () async {
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('Delete Photo'),
-                                      content: const Text('Are you sure you want to delete this photo?'),
-                                      actions: [
-                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(ctx, true), 
-                                          style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                          child: const Text('Delete'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-
-                                  if (confirm == true) {
-                                    final photoId = photos[currentPhotoIndex]['id'];
-                                    if (photoId != null) {
-                                      await _dbHelper.deleteFailureReport(photoId);
-                                    }
-
-                                    setState(() {
-                                      _reasonPhotos[currentReasonStr]!.removeAt(currentPhotoIndex);
-                                      if (_reasonPhotos[currentReasonStr]!.isEmpty) {
-                                        _reasonPhotos.remove(currentReasonStr);
-                                      }
-                                    });
-                                    
+                                  final reportToDelete = photos[currentPhotoIndex];
+                                  await _deleteReportWithDowntime(reportToDelete, currentReasonStr);
+                                  
+                                  if (mounted) {
                                     if (_reasonPhotos[currentReasonStr] == null) {
                                       Navigator.pop(context);
                                     } else {
                                       setDialogState(() {
                                         if (currentPhotoIndex >= _reasonPhotos[currentReasonStr]!.length) {
-                                          currentPhotoIndex = _reasonPhotos[currentReasonStr]!.length - 1;
+                                          currentPhotoIndex = (_reasonPhotos[currentReasonStr]!.length - 1).clamp(0, 999);
                                         }
                                       });
                                     }
@@ -972,26 +975,6 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
           final editedBytes = result['image'] as Uint8List;
           final description = result['description'] as String;
 
-          setState(() {
-            final photoData = {
-              'bytes': editedBytes,
-              'description': description,
-            };
-            if (_reasonPhotos[reason] == null) {
-              _reasonPhotos[reason] = [photoData];
-            } else {
-              _reasonPhotos[reason]!.add(photoData);
-            }
-          });
-          
-          // Show feedback
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Photo added to "$reason". Total: ${_reasonPhotos[reason]!.length}'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-
           if (_activeCategory == 'TechnicalFaults') {
             _showDetailedFaultReportDialog(reason, editedBytes);
           } else {
@@ -1004,6 +987,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
   }
 
   Future<void> _savePhotoOnly(String reason, Uint8List photoBytes, {String? description}) async {
+    LoadingOverlay.show(context, message: 'Saving photo...');
     // Save to DB with photo but NO minute addition
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final minutes = _downtimeData[reason] ?? 0;
@@ -1011,20 +995,34 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     // Use a unique ID for each photo so they don't overwrite each other
     final photoSyncId = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}-${DateTime.now().millisecondsSinceEpoch}';
 
-    // Sync to failure register with current minutes and new photo
-    await _syncToFailureRegister(reason, minutes, dateStr, photoBytes: photoBytes, description: description, overrideSyncId: photoSyncId);
+    // Sync to failure register with 0 new minutes (only the summary report carries the total)
+    await _syncToFailureRegister(reason, 0, dateStr, photoBytes: photoBytes, description: description, overrideSyncId: photoSyncId);
     
     // Refresh local photos list from DB to ensure count is correct
     final reports = await _dbHelper.getFailureReports();
     final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
-    final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+    final reasonReports = reports.where((r) {
+      final uid = r['unique_id']?.toString() ?? '';
+      return uid.startsWith('$syncIdPrefix-');
+    }).toList();
     
     final newPhotos = reasonReports
-        .where((r) => r['zdjecie_blob'] != null)
         .map((r) => {
           'id': r['id'],
-          'bytes': r['zdjecie_blob'] as Uint8List,
+          'bytes': r['zdjecie_blob'] as Uint8List?,
           'description': r['opis'] as String? ?? '',
+          'linia': r['linia'],
+          'lokalizacja': r['lokalizacja'],
+          'powod': r['powod'],
+          'priorytet': r['priorytet'],
+          'status': r['status'],
+          'data_rozpoczecia_naprawy': r['data_rozpoczecia_naprawy'],
+          'data_zakonczenia_naprawy': r['data_zakonczenia_naprawy'],
+          'downtime_minutes': r['downtime_minutes'],
+          'created_by': r['created_by'],
+          'kto_naprawil': r['kto_naprawil'],
+          'created_at': r['created_at'],
+          'unique_id': r['unique_id'],
         })
         .toList();
 
@@ -1036,6 +1034,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         _reasonPhotos[reason] = newPhotos;
       });
       _triggerAutoSave();
+      LoadingOverlay.hide(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Photo saved successfully'), backgroundColor: Colors.green),
       );
@@ -1573,74 +1572,113 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                               );
                               return;
                             }
-                            // Save to failure_reports
-                            final reportData = {
-                              'unique_id': faultId,
-                              'opis': descController.text,
-                              'lokalizacja': selectedLocation,
-                              'linia': _selectedLine ?? '-',
-                              'powod': selectedRootCause ?? '',
-                              'priorytet': selectedPriority ?? 'Medium',
-                              'status': isFixed ? 'CLOSED' : 'OPEN',
-                              'czy_rozwiazane': isFixed ? 1 : 0,
-                              'data_rozpoczecia_naprawy': '${DateFormat('yyyy-MM-dd').format(startDate)} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
-                              'data_zakonczenia_naprawy': isFixed ? '${DateFormat('yyyy-MM-dd').format(endDate)} ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}' : null,
-                              'downtime_minutes': downtime,
-                              'created_by': reporterController.text,
-                              'kto_naprawil': selectedRepairedBy ?? '',
-                              'zdjecie_blob': photoBytes,
-                              'created_at': DateTime(regDate.year, regDate.month, regDate.day, regTime.hour, regTime.minute).toIso8601String(),
-                            };
                             
-                            final failureId = await _dbHelper.insertFailureReport(reportData);
+                            LoadingOverlay.show(context, message: 'Saving report...');
+
+                            try {
+                              final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                              // Use PL prefix so it shows up in the Storing List photos preview
+                              final fullUniqueId = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}-$faultId';
+
+                              // Save to failure_reports
+                              final reportData = {
+                                'unique_id': fullUniqueId,
+                                'opis': descController.text,
+                                'lokalizacja': selectedLocation,
+                                'linia': _selectedLine ?? '-',
+                                'powod': selectedRootCause ?? '',
+                                'priorytet': selectedPriority ?? 'Medium',
+                                'status': isFixed ? 'CLOSED' : 'OPEN',
+                                'czy_rozwiazane': isFixed ? 1 : 0,
+                                'data_rozpoczecia_naprawy': '${DateFormat('yyyy-MM-dd').format(startDate)} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
+                                'data_zakonczenia_naprawy': isFixed ? '${DateFormat('yyyy-MM-dd').format(endDate)} ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}' : null,
+                                'downtime_minutes': downtime,
+                                'created_by': reporterController.text,
+                                'kto_naprawil': selectedRepairedBy ?? '',
+                                'zdjecie_blob': photoBytes,
+                                'created_at': DateTime(regDate.year, regDate.month, regDate.day, regTime.hour, regTime.minute).toIso8601String(),
+                              };
+                              
+                              final failureId = await _dbHelper.insertFailureReport(reportData);
                             
-                            // Refresh local photos to get the one we just added with its ID
-                            final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                            // Refresh local photos
                             final reports = await _dbHelper.getFailureReports();
                             final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
-                            final reasonReports = reports.where((r) => r['unique_id']?.toString().startsWith(syncIdPrefix) ?? false).toList();
+                            final reasonReports = reports.where((r) {
+                              final uid = r['unique_id']?.toString() ?? '';
+                              return uid.startsWith('$syncIdPrefix-');
+                            }).toList();
                             
                             final newPhotos = reasonReports
-                                .where((r) => r['zdjecie_blob'] != null)
                                 .map((r) => {
                                   'id': r['id'],
-                                  'bytes': r['zdjecie_blob'] as Uint8List,
+                                  'bytes': r['zdjecie_blob'] as Uint8List?,
                                   'description': r['opis'] as String? ?? '',
+                                  'linia': r['linia'],
+                                  'lokalizacja': r['lokalizacja'],
+                                  'powod': r['powod'],
+                                  'priorytet': r['priorytet'],
+                                  'status': r['status'],
+                                  'data_rozpoczecia_naprawy': r['data_rozpoczecia_naprawy'],
+                                  'data_zakonczenia_naprawy': r['data_zakonczenia_naprawy'],
+                                  'downtime_minutes': r['downtime_minutes'],
+                                  'created_by': r['created_by'],
+                                  'kto_naprawil': r['kto_naprawil'],
+                                  'created_at': r['created_at'],
+                                  'unique_id': r['unique_id'],
                                 })
                                 .toList();
 
-                            // Also insert a task for this failure
-                            await _dbHelper.insertTask({
-                              'title': _selectedLine ?? '-',
-                              'status': isFixed ? 'Zrealizowane' : 'W toku',
-                              'type': 'Technical Fault: ${descController.text}',
-                              'priority': selectedPriority,
-                              'date_start': startDate.toIso8601String(),
-                              'label': reporterController.text,
-                              'created_at': now.toIso8601String(),
-                              'created_by': widget.currentUsername,
-                              'failure_id': failureId,
-                            });
+                              // Also insert a task for this failure
+                              await _dbHelper.insertTask({
+                                'title': _selectedLine ?? '-',
+                                'status': isFixed ? 'Zrealizowane' : 'W toku',
+                                'type': 'Technical Fault: ${descController.text}',
+                                'priority': selectedPriority,
+                                'date_start': startDate.toIso8601String(),
+                                'label': reporterController.text,
+                                'created_at': now.toIso8601String(),
+                                'created_by': widget.currentUsername,
+                                'failure_id': failureId,
+                              });
 
-                            // Update the local state for the production list
-                            if (downtime > 0) {
-                              await _saveDowntimeEntry(reason, downtime, absoluteMinutes: (_downtimeData[reason] ?? 0) + downtime);
-                              if (mounted) {
-                                setState(() {
-                                  _downtimeData[reason] = (_downtimeData[reason] ?? 0) + downtime;
-                                  _downtimeControllers[reason]?.text = _downtimeData[reason].toString();
-                                  _reasonPhotos[reason] = newPhotos;
-                                });
+                              // Update the local state for the production list
+                              if (downtime > 0) {
+                                await _saveDowntimeEntry(reason, downtime, absoluteMinutes: (_downtimeData[reason] ?? 0) + downtime);
+                                if (mounted) {
+                                  setState(() {
+                                    _downtimeData[reason] = (_downtimeData[reason] ?? 0) + downtime;
+                                    _downtimeControllers[reason]?.text = _downtimeData[reason].toString();
+                                    _reasonPhotos[reason] = newPhotos;
+                                  });
+                                }
+                              } else {
+                                if (mounted) {
+                                  setState(() {
+                                    _reasonPhotos[reason] = newPhotos;
+                                  });
+                                }
                               }
-                            } else {
+                              
                               if (mounted) {
-                                setState(() {
-                                  _reasonPhotos[reason] = newPhotos;
-                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Technical fault report saved successfully'), backgroundColor: Colors.green),
+                                );
+                              }
+
+                              if (context.mounted) {
+                                LoadingOverlay.hide(context);
+                                Navigator.pop(context);
+                              }
+                            } catch (e) {
+                              debugPrint('Save error: $e');
+                              if (context.mounted) {
+                                LoadingOverlay.hide(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error saving report: $e'), backgroundColor: Colors.red),
+                                );
                               }
                             }
-                            
-                            if (context.mounted) Navigator.pop(context);
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue.shade700,
@@ -1664,14 +1702,178 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     );
   }
 
-  Widget _buildDialogRow(String label, String value) {
+  Future<void> _showReasonReportsDialog(String reason) async {
+    final reports = _reasonPhotos[reason] ?? [];
+    if (reports.isEmpty) return;
+
+    if (reports.length == 1) {
+      _showReportDetailsPreview(reports.first);
+      return;
+    }
+
+    final s = AppStrings.of(context);
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${reason.toUpperCase()} - REPORTS'),
+        content: SizedBox(
+          width: 400,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: reports.length,
+            itemBuilder: (context, index) {
+              final r = reports[index];
+              final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '') ?? DateTime.now();
+              return ListTile(
+                leading: r['bytes'] != null 
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.memory(r['bytes'] as Uint8List, width: 40, height: 40, fit: BoxFit.cover),
+                      )
+                    : const Icon(Icons.description_outlined),
+                title: Text(TimeUtils.simplifyFaultId(r['unique_id'])),
+                subtitle: Text(DateFormat('HH:mm').format(createdAt)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  onPressed: () async {
+                    Navigator.pop(context); // Close list
+                    await _deleteReportWithDowntime(r, reason);
+                  },
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showReportDetailsPreview(r);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(s.t('close'))),
+        ],
+      ),
+    );
+  }
+
+  void _showReportDetailsPreview(Map<String, dynamic> report) {
+    final s = AppStrings.of(context);
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Container(
+          width: 500,
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'REPORT DETAILS',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue.shade800),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () async {
+                        final reason = report['powod'] ?? '';
+                        Navigator.pop(context); // Close preview
+                        await _deleteReportWithDowntime(report, reason);
+                      },
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      label: const Text('DELETE REPORT', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                
+                if (report['bytes'] != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.memory(
+                      report['bytes'] as Uint8List,
+                      width: double.infinity,
+                      height: 250,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
+                _buildPreviewRow('ID', TimeUtils.simplifyFaultId(report['unique_id'])),
+                _buildPreviewRow('LOCATION', report['lokalizacja'] ?? '-'),
+                _buildPreviewRow('PRIORITY', report['priorytet'] ?? '-'),
+                _buildPreviewRow('STATUS', report['status'] ?? '-'),
+                _buildPreviewRow('REPORTER', report['created_by'] ?? '-'),
+                _buildPreviewRow('REPAIRED BY', report['kto_naprawil'] ?? '-'),
+                
+                const SizedBox(height: 12),
+                const Text('DESCRIPTION:', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Text(
+                    report['description'] ?? '-',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(child: _buildPreviewRow('DOWNTIME', '${report['downtime_minutes'] ?? 0} min')),
+                    Expanded(child: _buildPreviewRow('DATE', report['created_at'] != null ? DateFormat('yyyy-MM-dd HH:mm').format(DateTime.parse(report['created_at'])) : '-')),
+                  ],
+                ),
+                
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Text(s.t('close').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreviewRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -2175,6 +2377,84 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
     });
   }
 
+  Future<void> _deleteReportWithDowntime(Map<String, dynamic> report, String reason) async {
+    final reportId = report['id'];
+    if (reportId == null) return;
+
+    final s = AppStrings.of(context);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('confirmDelete').toUpperCase()),
+        content: Text(s.t('deleteElementConfirm')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.t('cancel').toUpperCase())),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: Text(s.t('delete').toUpperCase()),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    LoadingOverlay.show(context, message: 'Deleting...');
+
+    try {
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      final syncIdPrefix = 'PL-${_selectedLine}-${dateStr}-${reason}-${_selectedShift}';
+
+      // 1. Delete from database
+      await _dbHelper.deleteFailureReport(reportId);
+      await _dbHelper.deleteTaskByFailureId(reportId);
+
+      // 2. Check how many reports are left for this reason
+      final allReports = await _dbHelper.getFailureReports();
+      final remainingReports = allReports.where((r) {
+        final uid = r['unique_id']?.toString() ?? '';
+        return uid.startsWith('$syncIdPrefix-');
+      }).toList();
+
+      if (remainingReports.isEmpty) {
+        // NO MORE REPORTS - Wipe everything for this reason
+        await _dbHelper.deleteFailureReportsByUniqueIdPrefix(syncIdPrefix);
+        await _dbHelper.deleteProductionDowntimeByCriteria(
+          lineName: _selectedLine ?? '',
+          date: dateStr,
+          reason: reason,
+          shift: _selectedShift ?? '',
+        );
+      } else {
+        // Still some reports left - recalculate total downtime
+        int newTotal = 0;
+        for (var r in remainingReports) {
+          newTotal += (r['downtime_minutes'] as num?)?.toInt() ?? 0;
+        }
+        await _saveDowntimeEntry(reason, 0, absoluteMinutes: newTotal);
+      }
+
+      // 3. Force a complete refresh of the UI from the database
+      await _loadCurrentDowntime();
+
+      if (mounted) {
+        LoadingOverlay.hide(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Deleted successfully'), backgroundColor: Colors.orange),
+        );
+      }
+    } catch (e) {
+      debugPrint('Delete error: $e');
+      if (mounted) {
+        LoadingOverlay.hide(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _saveDowntimeEntry(String reason, int minutesToADD, {int? absoluteMinutes}) async {
     final now = DateTime.now();
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
@@ -2206,10 +2486,8 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
       await _dbHelper.insertOrUpdateProductionDowntime(data);
 
       // Integrate with Downtime Register (failure_reports)
-      final totalMinutesForReason = _downtimeData[reason] ?? 0;
-      if (totalMinutesForReason > 0) {
-        await _syncToFailureRegister(reason, totalMinutesForReason, dateStr);
-      }
+      final totalMinutesForReason = absoluteMinutes ?? (_downtimeData[reason] ?? 0);
+      await _syncToFailureRegister(reason, totalMinutesForReason, dateStr);
     } catch (e) {
       debugPrint('Save error: $e');
     }
@@ -2229,6 +2507,16 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
         (r) => r['unique_id'] == syncId,
         orElse: () => {},
       );
+
+      // If minutes are 0 AND it's a summary report, remove it if it exists
+      if (totalMinutes <= 0 && overrideSyncId == null) {
+        if (existing.isNotEmpty) {
+          final failureId = existing['id'] as int;
+          await _dbHelper.deleteFailureReport(failureId);
+          await _dbHelper.deleteTaskByFailureId(failureId);
+        }
+        return;
+      }
 
       final Map<String, dynamic> updateData = {
         'downtime_minutes': totalMinutes,
@@ -2797,7 +3085,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                         Padding(
                           padding: const EdgeInsets.all(4.0),
                           child: Center(
-                            child: _reasonPhotos[reason]?.isNotEmpty ?? false
+                            child: _reasonPhotos[reason]?.any((p) => p['bytes'] != null) ?? false
                                 ? GestureDetector(
                                     onTap: () => _showFullImage(reason),
                                     child: Stack(
@@ -2809,12 +3097,14 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                             borderRadius: BorderRadius.circular(8),
                                             border: Border.all(color: Colors.blue.shade200),
                                             image: DecorationImage(
-                                              image: MemoryImage(_reasonPhotos[reason]!.first['bytes']),
+                                              image: MemoryImage(
+                                                _reasonPhotos[reason]!.firstWhere((p) => p['bytes'] != null)['bytes'] as Uint8List
+                                              ),
                                               fit: BoxFit.cover,
                                             ),
                                           ),
                                         ),
-                                        if (_reasonPhotos[reason]!.length > 1)
+                                        if (_reasonPhotos[reason]!.where((p) => p['bytes'] != null).length > 1)
                                           Positioned.fill(
                                             child: Container(
                                               decoration: BoxDecoration(
@@ -2823,7 +3113,7 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                                               ),
                                               child: Center(
                                                 child: Text(
-                                                  '+${_reasonPhotos[reason]!.length}',
+                                                  '+${_reasonPhotos[reason]!.where((p) => p['bytes'] != null).length}',
                                                   style: const TextStyle(
                                                     color: Colors.white,
                                                     fontSize: 16,
@@ -2857,29 +3147,49 @@ class _ProductionListScreenState extends State<ProductionListScreen> {
                         ),
                         Padding(
                           padding: const EdgeInsets.all(8.0),
-                          child: TextField(
-                            controller: _commentControllers[reason],
-                            style: const TextStyle(fontSize: 11),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(color: Colors.grey.shade200),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(color: Colors.grey.shade200),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(color: Colors.blue.shade300, width: 1.5),
-                              ),
-                              fillColor: Colors.grey.shade50,
-                              filled: true,
-                            ),
-                            onChanged: (v) => _updateOtherFields(),
-                          ),
+                          child: _activeCategory == 'TechnicalFaults'
+                              ? Center(
+                                  child: (_reasonPhotos[reason]?.isNotEmpty ?? false)
+                                      ? TextButton.icon(
+                                          onPressed: () => _showReasonReportsDialog(reason),
+                                          icon: const Icon(Icons.description_outlined, size: 18),
+                                          label: Text(
+                                            'REPORTS (${_reasonPhotos[reason]!.length})',
+                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                          ),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.blue.shade700,
+                                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                                          ),
+                                        )
+                                      : Text(
+                                          'NO REPORTS',
+                                          style: TextStyle(fontSize: 9, color: Colors.grey.shade400, fontWeight: FontWeight.bold),
+                                        ),
+                                )
+                              : TextField(
+                                  controller: _commentControllers[reason],
+                                  style: const TextStyle(fontSize: 11),
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(color: Colors.grey.shade200),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(color: Colors.grey.shade200),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(color: Colors.blue.shade300, width: 1.5),
+                                    ),
+                                    fillColor: Colors.grey.shade50,
+                                    filled: true,
+                                  ),
+                                  onChanged: (v) => _updateOtherFields(),
+                                ),
                         ),
                         // Plus/Minus Buttons column (Only for Pollution and Process)
                         Padding(

@@ -6,6 +6,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../app_strings.dart';
 import '../database/db_helper.dart';
+import '../utils/time_utils.dart';
+import '../widgets/loading_overlay.dart';
 
 class ReportFailureScreen extends StatefulWidget {
   const ReportFailureScreen({
@@ -75,15 +77,12 @@ class _ReportFailureScreenState extends State<ReportFailureScreen> {
     super.initState();
     _reporterController.text = widget.currentUsername;
     _generateUniqueId();
+    _liniaManualController.addListener(_generateUniqueId);
   }
 
   Future<void> _generateUniqueId() async {
     final now = DateTime.now();
     final year = now.year;
-    
-    // ISO week number calculation
-    final dayOfYear = int.parse(DateFormat('D').format(now));
-    final week = ((dayOfYear - now.weekday + 10) / 7).floor();
     
     // Get count of reports for the current year
     final reports = await _dbHelper.getFailureReports();
@@ -93,15 +92,21 @@ class _ReportFailureScreenState extends State<ReportFailureScreen> {
     }).length;
     
     final count = currentYearReports + 1;
-    final paddedCount = count.toString().padLeft(3, '0');
+    
+    final effectiveLine = _selectedLinia == 'Other' ? _liniaManualController.text.trim() : _selectedLinia;
     
     setState(() {
-      _uniqueId = '$paddedCount/W$week/$year';
+      _uniqueId = TimeUtils.formatFaultId(
+        line: effectiveLine,
+        count: count,
+        date: now,
+      );
     });
   }
 
   @override
   void dispose() {
+    _liniaManualController.removeListener(_generateUniqueId);
     _opisController.dispose();
     _lokalizacjaManualController.dispose();
     _liniaManualController.dispose();
@@ -191,59 +196,73 @@ class _ReportFailureScreenState extends State<ReportFailureScreen> {
       return;
     }
 
-    final downtimeStr = _calculateDowntime();
-    final downtimeMin = _calculateDowntimeMinutes();
+    LoadingOverlay.show(context, message: 'Saving report...');
 
-    final linia = _selectedLinia == 'Other' ? _liniaManualController.text.trim() : _selectedLinia;
-    final lokalizacja = _selectedLokalizacja == 'Other' ? _lokalizacjaManualController.text.trim() : _selectedLokalizacja;
+    try {
+      final downtimeStr = _calculateDowntime();
+      final downtimeMin = _calculateDowntimeMinutes();
 
-    Uint8List? imageBlob;
-    if (_image != null) {
-      imageBlob = await _image!.readAsBytes();
-    }
+      final linia = _selectedLinia == 'Other' ? _liniaManualController.text.trim() : _selectedLinia;
+      final lokalizacja = _selectedLokalizacja == 'Other' ? _lokalizacjaManualController.text.trim() : _selectedLokalizacja;
 
-    final failureId = await _dbHelper.insertFailureReport({
-      'unique_id': _uniqueId,
-      'opis': _opisController.text.trim(),
-      'lokalizacja': lokalizacja,
-      'linia': linia,
-      'powod': _powodController.text.trim(),
-      'priorytet': _priority,
-      'czy_rozwiazane': _czyRozwiazane ? 1 : 0,
-      'status': _czyRozwiazane ? 'ZAMKNIĘTY' : 'OTWARTY',
-      'czas_trwania': downtimeStr,
-      'downtime_minutes': downtimeMin,
-      'co_naprawiono': _naprawaController.text.trim(),
-      'kto_naprawil': _ktoController.text.trim(),
-      'zdjecie_sciezka': _image?.path ?? '',
-      'zdjecie_blob': imageBlob,
-      'created_by': _reporterController.text.trim(),
-      'created_at': DateTime.now().toIso8601String(),
-      'data_rozpoczecia_naprawy': _startNaprawy?.toIso8601String(),
-      'data_zakonczenia_naprawy': _koniecNaprawy?.toIso8601String(),
-    });
+      Uint8List? imageBlob;
+      if (_image != null) {
+        imageBlob = await _image!.readAsBytes();
+      }
 
-    // Also add to Tasks table so it shows up in Task List
-    await _dbHelper.insertTask({
-      'title': lokalizacja ?? '-',
-      'status': _czyRozwiazane ? 'Zrealizowane' : 'Zaplanowane',
-      'type': _opisController.text.trim(),
-      'priority': _priority,
-      'date_start': DateTime.now().toIso8601String(),
-      'label': widget.currentUsername,
-      'created_at': DateTime.now().toIso8601String(),
-      'created_by': widget.currentUsername,
-      'failure_id': failureId,
-    });
+      final failureId = await _dbHelper.insertFailureReport({
+        'unique_id': _uniqueId,
+        'opis': _opisController.text.trim(),
+        'lokalizacja': lokalizacja,
+        'linia': linia,
+        'powod': _powodController.text.trim(),
+        'priorytet': _priority,
+        'czy_rozwiazane': _czyRozwiazane ? 1 : 0,
+        'status': _czyRozwiazane ? 'ZAMKNIĘTY' : 'OTWARTY',
+        'czas_trwania': downtimeStr,
+        'downtime_minutes': downtimeMin,
+        'co_naprawiono': _naprawaController.text.trim(),
+        'kto_naprawil': _ktoController.text.trim(),
+        'zdjecie_sciezka': _image?.path ?? '',
+        'zdjecie_blob': imageBlob,
+        'created_by': _reporterController.text.trim(),
+        'created_at': DateTime.now().toIso8601String(),
+        'data_rozpoczecia_naprawy': _startNaprawy?.toIso8601String(),
+        'data_zakonczenia_naprawy': _koniecNaprawy?.toIso8601String(),
+      });
 
-    if (!mounted) {
-      return;
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(s.t('reportSaved'))),
-      );
-      Navigator.pop(context);
+      // Also add to Tasks table so it shows up in Task List
+      await _dbHelper.insertTask({
+        'title': lokalizacja ?? '-',
+        'status': _czyRozwiazane ? 'Zrealizowane' : 'Zaplanowane',
+        'type': _opisController.text.trim(),
+        'priority': _priority,
+        'date_start': DateTime.now().toIso8601String(),
+        'label': widget.currentUsername,
+        'created_at': DateTime.now().toIso8601String(),
+        'created_by': widget.currentUsername,
+        'failure_id': failureId,
+      });
+
+      if (!mounted) {
+        LoadingOverlay.hide(context);
+        return;
+      }
+      if (mounted) {
+        LoadingOverlay.hide(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.t('reportSaved'))),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      debugPrint('Save error: $e');
+      if (mounted) {
+        LoadingOverlay.hide(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving report: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -367,6 +386,7 @@ class _ReportFailureScreenState extends State<ReportFailureScreen> {
                   setState(() {
                     _selectedLinia = newValue;
                   });
+                  _generateUniqueId();
                 },
                 validator: (value) => value == null ? s.t('requiredField') : null,
               ),

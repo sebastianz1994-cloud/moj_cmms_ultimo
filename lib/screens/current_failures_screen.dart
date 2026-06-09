@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../database/db_helper.dart';
 import '../app_strings.dart';
+import '../utils/time_utils.dart';
 import 'package:intl/intl.dart';
 
 class CurrentFailuresScreen extends StatefulWidget {
@@ -80,7 +81,7 @@ class _CurrentFailuresScreenState extends State<CurrentFailuresScreen> {
                       children: [
                         const Icon(Icons.info_outline, size: 18, color: Colors.blue),
                         const SizedBox(width: 8),
-                        Text('ID: ${report['unique_id']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text('ID: ${TimeUtils.simplifyFaultId(report['unique_id'])}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       ],
                     ),
                   ),
@@ -327,7 +328,7 @@ class _CurrentFailuresScreenState extends State<CurrentFailuresScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(12.0),
-                      child: Text(report['unique_id'] ?? '-', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      child: Text(TimeUtils.simplifyFaultId(report['unique_id']), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
                     Padding(
                       padding: const EdgeInsets.all(12.0),
